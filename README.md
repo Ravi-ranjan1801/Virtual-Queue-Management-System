@@ -31,5 +31,5 @@ A full-stack web app designed to streamline customer flow by allowing users to g
 
 1. **Clone the repo**  
    ```bash
-   git clone https://github.com/Mohhit6075/Virtual-Queue-Management.git
+   git clone https://github.com/Ravi-ranjan1801/Virtual-Queue-Management.git
    cd Virtual-Queue-Management
