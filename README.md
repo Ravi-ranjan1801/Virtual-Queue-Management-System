@@ -317,7 +317,7 @@ This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) 
 
 If you have any questions or need help:
 
-- **Email**: [ravi.ranjan@example.com](mailto:ravi.ranjan@example.com)
+- **Email**: [raviranjan12059@gmail.com](mailto:raviranjan12059@gmail.com)
 - **GitHub Issues**: [Create an issue](https://github.com/Ravi-ranjan1801/Virtual-Queue-Management-System/issues)
 - **Discussions**: [Join the discussion](https://github.com/Ravi-ranjan1801/Virtual-Queue-Management-System/discussions)
 
