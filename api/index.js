@@ -158,22 +158,23 @@ const formatTime = (timeInSeconds) => {
   return `${hours}h ${minutes}m ${seconds}s`;
 };
 
-const sendSms = async (user) => {
-  const time = formatTime(user.timeRemaining);
+const sendSms = async (phone, message) => {
   try {
-    const message = await client.messages.create({
-      body: `Hello ${user.fullName}, you are now at position 2 in the queue. Your turn is coming in ${time}.`,
-      from: process.env.TWILIO_PHONE_NUMBER,
-      to: `+91${user.phone}`,
-    });
-    console.log(`SMS sent to ${user.phone}: ${message.sid}`);
-    user.smsSent = true;
-    await user.save();
-  } catch (error) {
-    console.log("Error sending SMS:", error);
+    // TODO: replace with real Twilio when credentials available
+    console.log(`[SMS MOCK] To: ${phone} | Message: ${message}`);
+    
+    // Real Twilio code (uncomment when you have credentials):
+    // await twilioClient.messages.create({
+    //   body: message,
+    //   from: process.env.TWILIO_PHONE_NUMBER,
+    //   to: phone,
+    // });
+  } catch (e) {
+    console.error("Error sending SMS:", e);
   }
 };
 
 server.listen(process.env.PORT, () => {
   console.log(`Server started at PORT:${process.env.PORT}`);
 });
+

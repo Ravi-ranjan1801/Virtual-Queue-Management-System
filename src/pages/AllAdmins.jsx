@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { Search, UserCog } from "lucide-react";
 import io from "socket.io-client";
 
-const socket = io("http://localhost:3000");
+const socket = io("http://localhost:5000");
 
 const AllAdmins = () => {
   const [admin, setAdmin] = useState([]);
@@ -11,7 +11,7 @@ const AllAdmins = () => {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const data = await fetch("http://localhost:3000/admins");
+        const data = await fetch("http://localhost:5000/admins");
         const result = await data.json();
         console.log("Fetched data:", result);
         setAdmin(result.data);

@@ -25,7 +25,7 @@ const Register = () => {
     const url = role === "User" ? "/user/register" : "/admin/register";
 
     try {
-      const response = await fetch(`http://localhost:3000${url}`, {
+      const response = await fetch(`http://localhost:5000${url}`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -60,7 +60,7 @@ const Register = () => {
 
   const getAlladmins = async () => {
     try {
-      const response = await fetch("http://localhost:3000/admins");
+      const response = await fetch("http://localhost:5000/admins");
       if (response.ok) {
         const result = await response.json();
         setAdmins(result.data);

@@ -13,7 +13,7 @@ const EditUserPage = () => {
   useEffect(() => {
     const fetchUser = async () => {
       try {
-        const response = await fetch(`http://localhost:3000/user/${user_id}`);
+        const response = await fetch(`http://localhost:5000/user/${user_id}`);
         const result = await response.json();
         setUser(result.data);
       } catch (error) {
@@ -26,7 +26,7 @@ const EditUserPage = () => {
   const handleUpdate = async (event) => {
     event.preventDefault();
     try {
-      const response = await fetch(`http://localhost:3000/user/${user_id}`, {
+      const response = await fetch(`http://localhost:5000/user/${user_id}`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",

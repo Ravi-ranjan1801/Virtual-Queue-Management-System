@@ -44,7 +44,7 @@ import {
   DialogTitle,
 } from "/src/Components/ui/dialog";
 
-const socket = io("http://localhost:3000");
+const socket = io("http://localhost:5000");
 
 function AdminPage() {
   const { admin_id } = useParams();
@@ -61,7 +61,7 @@ function AdminPage() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const data = await fetch(`http://localhost:3000/admin/${admin_id}`);
+        const data = await fetch(`http://localhost:5000/admin/${admin_id}`);
         const result = await data.json();
         setResponse(result.user || []);
         setAdmin(result.data);
@@ -87,7 +87,7 @@ function AdminPage() {
 
   const handleDelete = async (id) => {
     try {
-      await fetch(`http://localhost:3000/user/${id}`, { method: "DELETE" });
+      await fetch(`http://localhost:5000/user/${id}`, { method: "DELETE" });
     } catch (error) {
       console.log("Error deleting user:", error);
     }
@@ -95,7 +95,7 @@ function AdminPage() {
 
   const deleteAdmin = async (id) => {
     try {
-      await fetch(`http://localhost:3000/admin/${id}`, { method: "DELETE" });
+      await fetch(`http://localhost:5000/admin/${id}`, { method: "DELETE" });
 
       navigate("/login");
     } catch (error) {
@@ -111,7 +111,7 @@ function AdminPage() {
   const handleSetTime = async () => {
     try {
       const res = await fetch(
-        `http://localhost:3000/users/set-time/${admin_id}`,
+        `http://localhost:5000/users/set-time/${admin_id}`,
         {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
@@ -128,7 +128,7 @@ function AdminPage() {
   const handleStartCron = async () => {
     try {
       const res = await fetch(
-        `http://localhost:3000/start-process/${admin_id}`,
+        `http://localhost:5000/start-process/${admin_id}`,
         { method: "POST" }
       );
       const result = await res.json();

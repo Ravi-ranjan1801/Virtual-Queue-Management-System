@@ -9,12 +9,12 @@ const UserPage = () => {
   const { user_id } = useParams();
   const navigate = useNavigate();
   const [user, setUser] = useState(null);
-  const socket = io(`http://localhost:3000/user/${user_id}`);
+  const socket = io(`http://localhost:5000/user/${user_id}`);
 
   useEffect(() => {
     const fetchUser = async () => {
       try {
-        const response = await fetch(`http://localhost:3000/user/${user_id}`);
+        const response = await fetch(`http://localhost:5000/user/${user_id}`);
         const result = await response.json();
         setUser(result.data);
       } catch (error) {

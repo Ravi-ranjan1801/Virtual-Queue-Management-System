@@ -3,6 +3,8 @@ const bcryptjs = require("bcryptjs");
 const salt = bcryptjs.genSaltSync(10);
 const jwt = require("jsonwebtoken");
 
+const TIME_PER_USER = 5; // minutes per person in queue
+
 let io;
 
 const setIoInstance = (ioInstance) => {
@@ -10,13 +12,13 @@ const setIoInstance = (ioInstance) => {
 };
 
 const registerAdmin = async (req, res) => {
-  const { fullName } = req.body;
-  const existingUser = await User.findOne({ fullName });
-  if (existingUser) {
-    console.log("Admin already exists");
-    return res.status(400).json({ error: "Admin already exists" });
-  }
   try {
+    // Bug fix: check by email, not fullName
+    const existingUser = await Admin.findOne({ email: req.body.email });
+    if (existingUser) {
+      return res.status(400).json({ error: "Admin already exists" });
+    }
+
     const adminDoc = await Admin.create({
       fullName: req.body.fullName,
       email: req.body.email,
@@ -25,15 +27,13 @@ const registerAdmin = async (req, res) => {
       password: bcryptjs.hashSync(req.body.password, salt),
       start: false,
     });
-    // console.log('Registered Successfully:', adminDoc);
+
     io.emit("admin-updated", adminDoc);
-    return res.status(200).json({
-      data: adminDoc,
-    });
+    return res.status(200).json({ data: adminDoc });
+
   } catch (e) {
-    console.log("Failed Submission");
-    console.error(e);
-    res.status(400).json(e);
+    console.error("Registration failed:", e);
+    res.status(400).json({ error: "Registration failed" });
   }
 };
 
@@ -45,6 +45,7 @@ const loginAdmin = async (req, res) => {
     if (!adminDoc) {
       return res.status(400).json({ error: "Admin not found" });
     }
+
     const passOk = await bcryptjs.compare(password, adminDoc.password);
     if (passOk) {
       const token = jwt.sign(
@@ -57,37 +58,55 @@ const loginAdmin = async (req, res) => {
         data: adminDoc,
         token: token,
       });
-
-      // console.log("Admin is logged in");
     } else {
-      console.log("Wrong Password");
       res.status(404).json({ error: "Wrong Credentials" });
     }
+
   } catch (e) {
-    console.log("Error during login", e);
-    res.status(500).json({ error: "INTERNAL SERVER ERROR" });
+    console.error("Error during login:", e);
+    res.status(500).json({ error: "Internal Server Error" });
   }
 };
 
 const getAllUsers = async (req, res) => {
-  const { adminId } = req.params;
-  const admin = await Admin.findById(adminId);
-  // const allUsers = await User.find({ admin: adminId });
-  const allUsers = await User.find({ admin: adminId }).sort({ createdAt: 1 });
-  
-      const time = allUsers[1].timeRemaining - allUsers[0].timeRemaining;
-      let cumulativeTime = 0;
-      for (let i = 0; i < allUsers.length; i++) {
-        allUsers[i].timeRemaining = cumulativeTime + time;
-        cumulativeTime = allUsers[i].timeRemaining;
-        await allUsers[i].save();
-      }
+  try {
+    const { adminId } = req.params;
+    const admin = await Admin.findById(adminId);
 
-  return res.status(200).json({
-    message: "Welcome to Home Page",
-    data: admin,
-    user: allUsers,
-  });
+    if (!admin) {
+      return res.status(404).json({ error: "Admin not found" });
+    }
+
+    const allUsers = await User.find({ admin: adminId }).sort({ createdAt: 1 });
+
+    // Bug fix: use fixed time constant + bulk update instead of N individual saves
+    const bulkOps = allUsers.map((user, i) => ({
+      updateOne: {
+        filter: { _id: user._id },
+        update: { $set: { timeRemaining: i * TIME_PER_USER } },
+      },
+    }));
+
+    if (bulkOps.length > 0) {
+      await User.bulkWrite(bulkOps);
+    }
+
+    // Reflect updated values in the response
+    const updatedUsers = allUsers.map((user, i) => ({
+      ...user.toObject(),
+      timeRemaining: i * TIME_PER_USER,
+    }));
+
+    return res.status(200).json({
+      message: "Welcome to Home Page",
+      data: admin,
+      user: updatedUsers,
+    });
+
+  } catch (e) {
+    console.error("Error in getAllUsers:", e);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
 };
 
 const deleteAdmin = async (req, res) => {
@@ -97,16 +116,14 @@ const deleteAdmin = async (req, res) => {
     if (!deletedAdmin) {
       return res.status(404).json({ error: "Admin not found" });
     }
-    console.log("Deleted Successfully:", deletedAdmin);
     io.emit("admin-deleted", deletedAdmin);
     return res.status(200).json({
-      message: "User deleted successfully",
+      message: "Admin deleted successfully",
       data: deletedAdmin,
     });
   } catch (e) {
-    console.log("Failed to delete user");
-    console.error(e);
-    res.status(400).json(e);
+    console.error("Failed to delete admin:", e);
+    res.status(400).json({ error: "Delete failed" });
   }
 };
 
@@ -122,16 +139,14 @@ const updateAdmin = async (req, res) => {
     if (!updatedAdmin) {
       return res.status(404).json({ error: "Admin not found" });
     }
-    // console.log('Updated Successfully:', updatedAdmin);
     io.emit("admin-updated", updatedAdmin);
     return res.status(200).json({
       message: "Admin updated successfully",
       data: updatedAdmin,
     });
   } catch (e) {
-    console.log("Failed to update admin");
-    console.error(e);
-    res.status(400).json(e);
+    console.error("Failed to update admin:", e);
+    res.status(400).json({ error: "Update failed" });
   }
 };
 

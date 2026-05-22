@@ -13,7 +13,7 @@ const EditAdminPage = () => {
   useEffect(() => {
     const fetchAdmin = async () => {
       try {
-        const response = await fetch(`http://localhost:3000/admin/${adminId}`);
+        const response = await fetch(`http://localhost:5000/admin/${adminId}`);
         const result = await response.json();
         console.log(result.data);
         setAdmin(result.data);
@@ -27,7 +27,7 @@ const EditAdminPage = () => {
   const handleUpdate = async (event) => {
     event.preventDefault();
     try {
-      const response = await fetch(`http://localhost:3000/admin/${adminId}`, {
+      const response = await fetch(`http://localhost:5000/admin/${adminId}`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
