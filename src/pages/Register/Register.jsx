@@ -1,37 +1,51 @@
 import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
-// Validation rules — single place to change them (LLD: Single Responsibility)
+const API_URL = "http://localhost:5000";
+
 const validate = (fields, role) => {
   const errors = {};
-
-  if (!fields.fullName.trim())
-    errors.fullName = "Full name is required";
-
-  if (!fields.email.trim())
-    errors.email = "Email is required";
+  if (!fields.fullName.trim()) errors.fullName = "Full name is required";
+  if (!fields.email.trim()) errors.email = "Email is required";
   else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(fields.email))
     errors.email = "Enter a valid email address";
-
-  if (!fields.phone.trim())
-    errors.phone = "Phone number is required";
+  if (!fields.phone.trim()) errors.phone = "Phone number is required";
   else if (!/^\d{10}$/.test(fields.phone))
     errors.phone = "Phone must be exactly 10 digits";
-
   if (role === "Admin") {
-    if (!fields.password.trim())
-      errors.password = "Password is required";
+    if (!fields.password.trim()) errors.password = "Password is required";
     else if (fields.password.length < 6)
-      errors.password = "Password must be at least 6 characters";
+      errors.password = "Minimum 6 characters";
     if (!fields.adminSecret.trim())
       errors.adminSecret = "Admin secret code is required";
   }
-
   if (role === "User" && !fields.selectedAdmin)
     errors.selectedAdmin = "Please select a queue to join";
-
   return errors;
 };
+
+// ── Defined OUTSIDE component — never recreated on render ─────────────────
+const InputField = ({ label, name, type = "text", placeholder, autoComplete, fields, errors, onChange }) => (
+  <div>
+    <label className="text-white block mb-1 text-sm font-medium">{label}</label>
+    <input
+      type={type}
+      name={name}
+      value={fields[name]}
+      onChange={onChange}
+      placeholder={placeholder}
+      autoComplete={autoComplete}
+      className={`w-full p-3 bg-zinc-700 text-white rounded-lg focus:outline-none focus:ring-2
+        ${errors[name]
+          ? "border border-red-500 focus:ring-red-500"
+          : "border border-zinc-600 focus:ring-blue-500"
+        }`}
+    />
+    {errors[name] && (
+      <p className="text-red-400 text-xs mt-1">{errors[name]}</p>
+    )}
+  </div>
+);
 
 const Register = () => {
   const navigate = useNavigate();
@@ -50,18 +64,13 @@ const Register = () => {
   const [admins, setAdmins] = useState([]);
   const [loading, setLoading] = useState(false);
 
-  // Generic change handler — one function for all fields (LLD: DRY)
   const handleChange = (e) => {
     const { name, value } = e.target;
-
-    // Phone: only allow digits, max 10
     if (name === "phone") {
-      if (!/^\d*$/.test(value)) return; // block non-digits
-      if (value.length > 10) return;    // block beyond 10 digits
+      if (!/^\d*$/.test(value)) return;
+      if (value.length > 10) return;
     }
-
     setFields((prev) => ({ ...prev, [name]: value }));
-    // Clear that field's error as user types
     setErrors((prev) => ({ ...prev, [name]: "" }));
     setServerError("");
   };
@@ -69,7 +78,6 @@ const Register = () => {
   const handleRegister = async (e) => {
     e.preventDefault();
     setServerError("");
-
     const validationErrors = validate(fields, role);
     if (Object.keys(validationErrors).length > 0) {
       setErrors(validationErrors);
@@ -92,14 +100,12 @@ const Register = () => {
 
     try {
       setLoading(true);
-      const response = await fetch(`http://localhost:5000${url}`, {
+      const response = await fetch(`${API_URL}${url}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-
       const result = await response.json();
-
       if (response.ok) {
         if (role === "User") {
           localStorage.setItem("userToken", result.token);
@@ -109,10 +115,9 @@ const Register = () => {
           navigate(`/admin/${result.data._id}`);
         }
       } else {
-        // Show the specific error from server
         setServerError(result.error || "Registration failed. Please try again.");
       }
-    } catch (error) {
+    } catch {
       setServerError("Cannot connect to server. Please try again.");
     } finally {
       setLoading(false);
@@ -122,40 +127,15 @@ const Register = () => {
   useEffect(() => {
     const fetchAdmins = async () => {
       try {
-        const res = await fetch("http://localhost:5000/admins");
+        const res = await fetch(`${API_URL}/admins`);
         const result = await res.json();
-        setAdmins(result.data);
+        setAdmins(result.data || []);
       } catch {
         console.error("Failed to fetch admins");
       }
     };
     fetchAdmins();
   }, []);
-
-  // Reusable input field component (LLD: component reuse)
-  const InputField = ({ label, name, type = "text", placeholder, autoComplete }) => (
-    <div>
-      <label className="text-white block mb-1 text-sm font-medium">
-        {label}
-      </label>
-      <input
-        type={type}
-        name={name}
-        value={fields[name]}
-        onChange={handleChange}
-        placeholder={placeholder}
-        autoComplete={autoComplete}
-        className={`w-full p-3 bg-zinc-700 text-white rounded-lg focus:outline-none focus:ring-2 
-          ${errors[name]
-            ? "border border-red-500 focus:ring-red-500"
-            : "border border-zinc-600 focus:ring-blue-500"
-          }`}
-      />
-      {errors[name] && (
-        <p className="text-red-400 text-xs mt-1">{errors[name]}</p>
-      )}
-    </div>
-  );
 
   return (
     <div className="min-h-screen bg-zinc-900 flex items-center justify-center py-8">
@@ -164,10 +144,9 @@ const Register = () => {
           Create an Account
         </h2>
         <p className="text-gray-400 text-center mb-6 text-sm">
-          Enter your information to create an account
+          Enter your information to join a queue
         </p>
 
-        {/* Server-level error banner */}
         {serverError && (
           <div className="mb-4 p-3 bg-red-500/20 border border-red-500/50 rounded-lg">
             <p className="text-red-400 text-sm text-center">{serverError}</p>
@@ -175,11 +154,15 @@ const Register = () => {
         )}
 
         <form onSubmit={handleRegister} className="space-y-4">
+          {/* Pass fields, errors, onChange as props — InputField is stable outside */}
           <InputField
             label="Full Name"
             name="fullName"
             placeholder="Enter your full name"
             autoComplete="name"
+            fields={fields}
+            errors={errors}
+            onChange={handleChange}
           />
           <InputField
             label="Email"
@@ -187,6 +170,9 @@ const Register = () => {
             type="email"
             placeholder="Enter your email address"
             autoComplete="email"
+            fields={fields}
+            errors={errors}
+            onChange={handleChange}
           />
           <InputField
             label="Mobile Number (10 digits)"
@@ -194,9 +180,11 @@ const Register = () => {
             type="tel"
             placeholder="Enter your 10-digit mobile number"
             autoComplete="tel"
+            fields={fields}
+            errors={errors}
+            onChange={handleChange}
           />
 
-          {/* Account Type */}
           <div>
             <label className="text-white block mb-2 text-sm font-medium">
               Account Type
@@ -222,7 +210,6 @@ const Register = () => {
             </div>
           </div>
 
-          {/* Admin-only fields */}
           {role === "Admin" && (
             <>
               <InputField
@@ -231,17 +218,22 @@ const Register = () => {
                 type="password"
                 placeholder="Min. 6 characters"
                 autoComplete="new-password"
+                fields={fields}
+                errors={errors}
+                onChange={handleChange}
               />
               <InputField
                 label="Admin Secret Code"
                 name="adminSecret"
                 type="password"
                 placeholder="Enter the admin registration code"
+                fields={fields}
+                errors={errors}
+                onChange={handleChange}
               />
             </>
           )}
 
-          {/* User-only fields */}
           {role === "User" && (
             <div>
               <label className="text-white block mb-1 text-sm font-medium">
@@ -273,7 +265,7 @@ const Register = () => {
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-blue-600 text-white p-3 rounded-lg hover:bg-blue-700 
+            className="w-full bg-blue-600 text-white p-3 rounded-lg hover:bg-blue-700
               transition duration-200 disabled:opacity-50 disabled:cursor-not-allowed mt-2"
           >
             {loading ? "Registering..." : "Register"}
