@@ -1,6 +1,6 @@
 const mongoose = require("mongoose");
-require("dotenv").config();
 
+// dotenv already loaded in index.js before this is called
 const dbConnect = () => {
   mongoose
     .connect(process.env.DB_URL)
@@ -8,8 +8,8 @@ const dbConnect = () => {
       console.log("Connected to Database");
     })
     .catch((e) => {
-      console.log("Error in connection to database");
-      console.error(e);
+      console.error("Database connection failed:", e.message);
+      process.exit(1); // exit if no DB — server is useless without it
     });
 };
 
