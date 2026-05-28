@@ -1,45 +1,33 @@
-const { User, Admin, USER_STATUS } = require("../models/User");
+const { User, Admin } = require("../models/User");
 const { recalculateQueue } = require("./User");
 const bcryptjs = require("bcryptjs");
-const salt = bcryptjs.genSaltSync(10);
 const jwt = require("jsonwebtoken");
+const salt = bcryptjs.genSaltSync(10);
 
 let io;
+const setIoInstance = (ioInstance) => { io = ioInstance; };
 
-const setIoInstance = (ioInstance) => {
-  io = ioInstance;
-};
-
-// ─── Register Admin ────────────────────────────────────────────────────────
+// ── Register admin ─────────────────────────────────────────────────────────
 const registerAdmin = async (req, res) => {
   try {
     const { fullName, email, phone, password, adminSecret } = req.body;
 
-    // Secret code check — prevents random people registering as admin
-    // Set ADMIN_SECRET_CODE=yourcode in your .env file
     if (adminSecret !== process.env.ADMIN_SECRET_CODE) {
-      return res.status(403).json({
-        error: "Invalid admin secret code",
-      });
+      return res.status(403).json({ error: "Invalid admin secret code" });
     }
 
-    const existingAdmin = await Admin.findOne({ email });
-    if (existingAdmin) {
+    const existing = await Admin.findOne({ email });
+    if (existing) {
       return res.status(400).json({ error: "Email already registered" });
     }
 
     const adminDoc = await Admin.create({
-      fullName,
-      email,
-      phone,
+      fullName, email, phone,
       password: bcryptjs.hashSync(password, salt),
-      role: "Admin",
-      start: false,
+      delay: 10,
       queueStatus: "notStarted",
-      delay: 10, // default 10 mins per user
     });
 
-    // Admin gets their own JWT too for immediate login after register
     const token = jwt.sign(
       { email, id: adminDoc._id, role: adminDoc.role },
       process.env.SECRET_KEY,
@@ -47,7 +35,6 @@ const registerAdmin = async (req, res) => {
     );
 
     io.emit("admin-updated", adminDoc);
-
     return res.status(200).json({ data: adminDoc, token });
 
   } catch (e) {
@@ -56,12 +43,12 @@ const registerAdmin = async (req, res) => {
   }
 };
 
-// ─── Login Admin ───────────────────────────────────────────────────────────
+// ── Login admin ────────────────────────────────────────────────────────────
 const loginAdmin = async (req, res) => {
-  const { email, password } = req.body;
-
   try {
+    const { email, password } = req.body;
     const adminDoc = await Admin.findOne({ email });
+
     if (!adminDoc) {
       return res.status(400).json({ error: "No admin found with this email" });
     }
@@ -78,9 +65,7 @@ const loginAdmin = async (req, res) => {
     );
 
     res.cookie("admintoken", token, { httpOnly: true }).json({
-      message: "Login Successful",
-      data: adminDoc,
-      token,
+      message: "Login Successful", data: adminDoc, token,
     });
 
   } catch (e) {
@@ -89,290 +74,147 @@ const loginAdmin = async (req, res) => {
   }
 };
 
-// ─── Get All Users for Admin ───────────────────────────────────────────────
-// Fix: no longer overwrites timeRemaining on every fetch
-// Just reads current state from DB
+// ── Get all users for admin dashboard ─────────────────────────────────────
+// Fix: just read from DB — never overwrite timeRemaining on fetch
 const getAllUsers = async (req, res) => {
   try {
     const { adminId } = req.params;
     const admin = await Admin.findById(adminId);
+    if (!admin) return res.status(404).json({ error: "Admin not found" });
 
-    if (!admin) {
-      return res.status(404).json({ error: "Admin not found" });
-    }
+    const users = await User.find({ admin: adminId }).sort({ createdAt: 1 });
 
-    const allUsers = await User.find({ admin: adminId }).sort({ createdAt: 1 });
-
-    return res.status(200).json({
-      message: "Dashboard data fetched",
-      data: admin,
-      user: allUsers,
-    });
+    return res.status(200).json({ data: admin, user: users });
 
   } catch (e) {
-    console.error("Error in getAllUsers:", e);
+    console.error("getAllUsers error:", e);
     res.status(500).json({ error: "Internal Server Error" });
   }
 };
 
-// ─── Call Next User ────────────────────────────────────────────────────────
-// Admin manually calls next — marks current in-service as completed,
-// next waiting user becomes called, then inService
-const callNextUser = async (req, res) => {
+// ── Pop current user (admin marks current user as done, removes them) ──────
+// This is the core admin action — like calling "next" at a hospital counter
+// LLD: Single responsibility — one function, one job
+const popCurrentUser = async (req, res) => {
   const { adminId } = req.params;
   try {
-    const admin = await Admin.findById(adminId);
-    if (!admin) {
-      return res.status(404).json({ error: "Admin not found" });
+    // First user by join time = currently being served
+    const firstUser = await User.findOne({ admin: adminId }).sort({ createdAt: 1 });
+
+    if (!firstUser) {
+      return res.status(404).json({ error: "Queue is empty" });
     }
 
-    // Mark current inService user as completed
-    const currentUser = await User.findOne({
-      admin: adminId,
-      status: USER_STATUS.IN_SERVICE,
+    // Remove them — they've been served
+    await User.findByIdAndDelete(firstUser._id);
+    await Admin.findByIdAndUpdate(adminId, {
+      $inc: { totalServed: 1 },
+      $pull: { users: firstUser._id },
     });
 
-    if (currentUser) {
-      currentUser.status = USER_STATUS.COMPLETED;
-      await currentUser.save();
-
-      // Increment analytics counter
-      await Admin.findByIdAndUpdate(adminId, {
-        $inc: { totalServed: 1 },
-      });
-    }
-
-    // Find next waiting user (earliest join time)
-    const nextUser = await User.findOne({
-      admin: adminId,
-      status: USER_STATUS.WAITING,
-    }).sort({ createdAt: 1 });
-
-    if (!nextUser) {
-      // Queue is empty
-      const updatedUsers = await recalculateQueue(adminId);
-      io.to(`queue_${adminId}`).emit("queue-updated", updatedUsers);
-      return res.status(200).json({ message: "Queue is empty", data: null });
-    }
-
-    // Mark next user as called — they get 60 seconds to confirm presence
-    nextUser.status = USER_STATUS.CALLED;
-    await nextUser.save();
-
-    // Notify that specific user's room
-    io.to(`queue_${adminId}`).emit("user-called", {
-      userId: nextUser._id,
-      ticketNumber: nextUser.ticketNumber,
-      name: nextUser.fullName,
-    });
-
-    // After 60 seconds, if not confirmed → mark skipped, call next
-    setTimeout(async () => {
-      const recheckUser = await User.findById(nextUser._id);
-      if (recheckUser && recheckUser.status === USER_STATUS.CALLED && !recheckUser.isPresent) {
-        recheckUser.status = USER_STATUS.SKIPPED;
-        await recheckUser.save();
-
-        await Admin.findByIdAndUpdate(adminId, {
-          $inc: { totalServed: 1 },
-        });
-
-        // Notify queue about skip
-        io.to(`queue_${adminId}`).emit("user-skipped", {
-          userId: recheckUser._id,
-          ticketNumber: recheckUser.ticketNumber,
-        });
-
-        // Auto call next after skip
-        const afterSkip = await User.findOne({
-          admin: adminId,
-          status: USER_STATUS.WAITING,
-        }).sort({ createdAt: 1 });
-
-        if (afterSkip) {
-          afterSkip.status = USER_STATUS.IN_SERVICE;
-          await afterSkip.save();
-        }
-
-        const updatedUsers = await recalculateQueue(adminId);
-        io.to(`queue_${adminId}`).emit("queue-updated", updatedUsers);
-      } else if (recheckUser && recheckUser.status === USER_STATUS.CALLED) {
-        // User confirmed — move to inService
-        recheckUser.status = USER_STATUS.IN_SERVICE;
-        await recheckUser.save();
-
-        const updatedUsers = await recalculateQueue(adminId);
-        io.to(`queue_${adminId}`).emit("queue-updated", updatedUsers);
-      }
-    }, 60000); // 60 seconds to confirm
-
+    // Recalculate positions and wait times for remaining users
     const updatedUsers = await recalculateQueue(adminId);
+
+    // Notify position 2 user (index 1) — their turn is approaching
+    // "gets notified when position becomes 2nd"
+    if (updatedUsers.length >= 2) {
+      const nextUpUser = updatedUsers[1]; // new position 2
+      if (!nextUpUser.smsSent) {
+        // Socket notification to their dashboard
+        io.to(`queue_${adminId}`).emit("user-nearly-called", {
+          userId: nextUpUser._id.toString(),
+          ticketNumber: nextUpUser.ticketNumber,
+          name: nextUpUser.fullName,
+        });
+        // Mark SMS sent to avoid repeat
+        await User.findByIdAndUpdate(nextUpUser._id, { smsSent: true });
+      }
+    }
+
     io.to(`queue_${adminId}`).emit("queue-updated", updatedUsers);
 
     return res.status(200).json({
-      message: "Next user called",
-      data: nextUser,
+      message: `${firstUser.fullName} (${firstUser.ticketNumber}) served and removed`,
+      data: updatedUsers,
     });
 
   } catch (e) {
-    console.error("Call next failed:", e);
-    res.status(500).json({ error: "Failed to call next user" });
+    console.error("Pop user failed:", e);
+    res.status(500).json({ error: "Failed to pop current user" });
   }
 };
 
-// ─── Get Analytics ─────────────────────────────────────────────────────────
+// ── Analytics ──────────────────────────────────────────────────────────────
 const getAnalytics = async (req, res) => {
   const { adminId } = req.params;
   try {
     const admin = await Admin.findById(adminId);
-    if (!admin) {
-      return res.status(404).json({ error: "Admin not found" });
-    }
+    if (!admin) return res.status(404).json({ error: "Admin not found" });
 
-    const now = new Date();
-    const todayStart = new Date(now.setHours(0, 0, 0, 0));
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
 
-    // All users who joined today
     const todayUsers = await User.find({
       admin: adminId,
       createdAt: { $gte: todayStart },
     });
 
-    const totalToday = todayUsers.length;
-    const completedToday = todayUsers.filter(
-      (u) => u.status === USER_STATUS.COMPLETED
-    ).length;
-    const skippedToday = todayUsers.filter(
-      (u) => u.status === USER_STATUS.SKIPPED
-    ).length;
-    const currentlyWaiting = await User.countDocuments({
-      admin: adminId,
-      status: USER_STATUS.WAITING,
-    });
-
-    // Average wait time = avg position * delay
-    const avgWaitTime = admin.delay * (currentlyWaiting / 2);
+    const currentlyWaiting = await User.countDocuments({ admin: adminId });
 
     return res.status(200).json({
       data: {
         totalServed: admin.totalServed,
-        totalToday,
-        completedToday,
-        skippedToday,
+        totalToday: todayUsers.length,
         currentlyWaiting,
-        avgWaitTimeMinutes: Math.round(avgWaitTime),
         avgServingTimeMinutes: admin.delay,
+        avgWaitTimeMinutes: Math.round(admin.delay * currentlyWaiting / 2),
       },
     });
 
   } catch (e) {
-    console.error("Analytics fetch failed:", e);
+    console.error("Analytics error:", e);
     res.status(500).json({ error: "Failed to fetch analytics" });
   }
 };
 
-// ─── Update Queue Status (pause/resume) ───────────────────────────────────
-const updateQueueStatus = async (req, res) => {
-  const { adminId } = req.params;
-  const { queueStatus, pauseReason } = req.body;
-
-  const validStatuses = ["notStarted", "active", "paused"];
-  if (!validStatuses.includes(queueStatus)) {
-    return res.status(400).json({ error: "Invalid queue status" });
-  }
-
-  try {
-    const admin = await Admin.findByIdAndUpdate(
-      adminId,
-      {
-        queueStatus,
-        pauseReason: queueStatus === "paused" ? pauseReason : "",
-        start: queueStatus === "active",
-      },
-      { new: true }
-    );
-
-    if (!admin) {
-      return res.status(404).json({ error: "Admin not found" });
-    }
-
-    // Notify all users in this queue about status change
-    io.to(`queue_${adminId}`).emit("queue-status-changed", {
-      queueStatus,
-      pauseReason: admin.pauseReason,
-    });
-
-    return res.status(200).json({
-      message: "Queue status updated",
-      data: admin,
-    });
-
-  } catch (e) {
-    console.error("Queue status update failed:", e);
-    res.status(500).json({ error: "Failed to update queue status" });
-  }
-};
-
-// ─── Delete Admin ──────────────────────────────────────────────────────────
+// ── Delete admin ───────────────────────────────────────────────────────────
 const deleteAdmin = async (req, res) => {
-  const { id } = req.params;
   try {
-    const deletedAdmin = await Admin.findByIdAndDelete(id);
-    if (!deletedAdmin) {
-      return res.status(404).json({ error: "Admin not found" });
-    }
+    const deletedAdmin = await Admin.findByIdAndDelete(req.params.id);
+    if (!deletedAdmin) return res.status(404).json({ error: "Admin not found" });
 
-    // Delete all users in this admin's queue
-    await User.deleteMany({ admin: id });
-
+    await User.deleteMany({ admin: req.params.id });
     io.emit("admin-deleted", deletedAdmin);
 
-    return res.status(200).json({
-      message: "Admin and all associated users deleted",
-      data: deletedAdmin,
-    });
+    return res.status(200).json({ message: "Admin deleted", data: deletedAdmin });
 
   } catch (e) {
-    console.error("Admin delete failed:", e);
-    res.status(400).json({ error: "Delete failed" });
+    console.error("Delete admin failed:", e);
+    res.status(500).json({ error: "Delete failed" });
   }
 };
 
-// ─── Update Admin Profile ──────────────────────────────────────────────────
+// ── Update admin profile ───────────────────────────────────────────────────
 const updateAdmin = async (req, res) => {
   const { adminId } = req.params;
   const { fullName, email, phone } = req.body;
   try {
-    const updatedAdmin = await Admin.findByIdAndUpdate(
+    const updated = await Admin.findByIdAndUpdate(
       adminId,
       { fullName, email, phone },
       { new: true, runValidators: true }
     );
-    if (!updatedAdmin) {
-      return res.status(404).json({ error: "Admin not found" });
-    }
-
-    io.emit("admin-updated", updatedAdmin);
-
-    return res.status(200).json({
-      message: "Admin updated successfully",
-      data: updatedAdmin,
-    });
-
+    if (!updated) return res.status(404).json({ error: "Admin not found" });
+    io.emit("admin-updated", updated);
+    return res.status(200).json({ data: updated });
   } catch (e) {
-    console.error("Admin update failed:", e);
+    console.error("Update admin failed:", e);
     res.status(400).json({ error: "Update failed" });
   }
 };
 
 module.exports = {
-  registerAdmin,
-  loginAdmin,
-  getAllUsers,
-  callNextUser,
-  getAnalytics,
-  updateQueueStatus,
-  deleteAdmin,
-  updateAdmin,
-  setIoInstance,
+  registerAdmin, loginAdmin, getAllUsers,
+  popCurrentUser, getAnalytics,
+  deleteAdmin, updateAdmin, setIoInstance,
 };

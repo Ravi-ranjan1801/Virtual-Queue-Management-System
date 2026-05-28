@@ -188,53 +188,31 @@ app.post("/start-process/:admin_id", async (req, res) => {
 // LLD: Single Responsibility — cron only decrements timers
 // Business logic (recalculate, status) handled in controllers
 const initCronJob = (admin_id) => {
-  // Stop existing job if any before creating new one
-  if (cronJobs[admin_id]) {
-    cronJobs[admin_id].stop();
-  }
+  if (cronJobs[admin_id]) cronJobs[admin_id].stop();
 
   const cronJob = cron.schedule(
-    "* * * * * *", // every second
+    "* * * * * *",
     async () => {
       try {
         if (!mongoose.Types.ObjectId.isValid(admin_id)) return;
 
-        const users = await User.find({
-          admin: admin_id,
-          status: { $in: [USER_STATUS.WAITING, USER_STATUS.CALLED] },
-        }).sort({ createdAt: 1 });
+        // Bulk decrement — one DB call instead of N saves
+        // Only decrement users with time remaining
+        await User.updateMany(
+          { admin: admin_id, timeRemaining: { $gt: 0 } },
+          { $inc: { timeRemaining: -1 } }
+        );
 
-        for (const user of users) {
-          if (user.timeRemaining > 0) {
-            user.timeRemaining -= 1;
-            await user.save();
-          } else if (
-            user.timeRemaining === 0 &&
-            user.status === USER_STATUS.WAITING
-          ) {
-            // Time expired — mark as expired, don't delete immediately
-            // Admin can review expired users
-            user.status = USER_STATUS.EXPIRED;
-            await user.save();
-            console.log(`User ${user.fullName} (${user.ticketNumber}) expired`);
+        // No auto-delete, no expired status
+        // Admin manually pops when done serving
 
-            io.to(`queue_${admin_id}`).emit("user-expired", {
-              userId: user._id,
-              ticketNumber: user.ticketNumber,
-              name: user.fullName,
-            });
-          }
-        }
-
-        // Emit updated queue to all clients in this room
-        const allUsers = await User.find({
-          admin: admin_id,
-        }).sort({ createdAt: 1 });
+        const allUsers = await User.find({ admin: admin_id })
+          .sort({ createdAt: 1 });
 
         io.to(`queue_${admin_id}`).emit("time-updated", allUsers);
 
       } catch (error) {
-        console.error(`Cron error for admin ${admin_id}:`, error);
+        console.error(`Cron error for ${admin_id}:`, error);
       }
     },
     { scheduled: false }
