@@ -2,9 +2,9 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   Search, Clock, UserCog, LogOut, Edit, Trash2, Power,
-  ChevronDown, EllipsisVertical, Calendar, Timer,
-  CircleUserRound, SkipForward, BarChart2, Users,
-  CheckCircle, AlertCircle, Hash,
+  ChevronDown, BarChart2, Timer, CircleUserRound,
+  SkipForward, Eye, X, Phone, Mail, Hash, Users,
+  CheckCircle,
 } from "lucide-react";
 import io from "socket.io-client";
 import { Button } from "/src/Components/ui/button";
@@ -13,7 +13,6 @@ import {
   Card, CardContent, CardDescription,
   CardHeader, CardTitle, CardFooter,
 } from "/src/Components/ui/card";
-import { Badge } from "/src/Components/ui/badge";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
   DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
@@ -25,35 +24,27 @@ import {
 
 const API_URL = "http://localhost:5000";
 
-// ─── Format seconds → "0h 5m 30s" ────────────────────────────────────────
-const FormatTime = (seconds) => {
-  if (!seconds || seconds <= 0) return "0h 0m 0s";
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = seconds % 60;
+const formatTime = (sec) => {
+  if (!sec || sec <= 0) return "0h 0m 0s";
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = sec % 60;
   return `${h}h ${m}m ${s}s`;
 };
 
-// ─── Format ISO timestamp → local time string ──────────────────────────────
-// Fix: use toLocaleTimeString — no hardcoded UTC offsets
-const FormatArrival = (isoString) => {
-  if (!isoString) return "—";
-  return new Date(isoString).toLocaleTimeString("en-IN", {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
+const formatArrival = (iso) => {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleTimeString("en-IN", {
+    hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: true,
   });
 };
 
-// ─── User status badge config ──────────────────────────────────────────────
-const STATUS_CONFIG = {
-  waiting:   { label: "Waiting",    color: "text-yellow-400 border-yellow-500/30 bg-yellow-500/10" },
-  called:    { label: "Called",     color: "text-blue-400   border-blue-500/30   bg-blue-500/10" },
-  inService: { label: "In Service", color: "text-green-400  border-green-500/30  bg-green-500/10" },
-  skipped:   { label: "Skipped",    color: "text-red-400    border-red-500/30    bg-red-500/10" },
-  completed: { label: "Completed",  color: "text-emerald-400 border-emerald-500/30 bg-emerald-500/10" },
-  expired:   { label: "Expired",    color: "text-gray-400   border-gray-500/30   bg-gray-500/10" },
+const getMeetingTime = (timeRemaining) => {
+  if (!timeRemaining || timeRemaining <= 0) return "Soon";
+  const t = new Date(Date.now() + timeRemaining * 1000);
+  return t.toLocaleTimeString("en-IN", {
+    hour: "2-digit", minute: "2-digit", hour12: true,
+  });
 };
 
 function AdminPage() {
@@ -62,28 +53,29 @@ function AdminPage() {
 
   const [users, setUsers] = useState([]);
   const [admin, setAdmin] = useState(null);
-  const [time, setTime] = useState("");
+  const [time, setTime] = useState(10);
   const [searchQuery, setSearchQuery] = useState("");
-  const [showConfirmDialog, setShowConfirmDialog] = useState(false);
-  const [dialogAction, setDialogAction] = useState(null);
-  const [selectedUser, setSelectedUser] = useState(null);
-  const [pauseReason, setPauseReason] = useState("");
-  const [showPauseInput, setShowPauseInput] = useState(false);
   const [analytics, setAnalytics] = useState(null);
   const [showAnalytics, setShowAnalytics] = useState(false);
-  const [callingNext, setCallingNext] = useState(false);
+  const [popping, setPopping] = useState(false);
   const [alert, setAlert] = useState(null);
+  const [pauseReason, setPauseReason] = useState("");
+  const [showPauseInput, setShowPauseInput] = useState(false);
 
-  // Socket in ref — stable, no recreation on render
+  // Dialogs
+  const [showDeleteUserDialog, setShowDeleteUserDialog] = useState(false);
+  const [showDeleteAdminDialog, setShowDeleteAdminDialog] = useState(false);
+  const [showUserDetailModal, setShowUserDetailModal] = useState(false);
+  const [selectedUser, setSelectedUser] = useState(null);
+
   const socketRef = useRef(null);
 
-  // ─── Alert helper ────────────────────────────────────────────────────
   const showAlert = useCallback((type, message) => {
     setAlert({ type, message });
     setTimeout(() => setAlert(null), 4000);
   }, []);
 
-  // ─── Fetch dashboard data ─────────────────────────────────────────────
+  // ── Fetch dashboard ──────────────────────────────────────────────────────
   const fetchData = useCallback(async () => {
     try {
       const res = await fetch(`${API_URL}/admin/${admin_id}`);
@@ -92,35 +84,27 @@ function AdminPage() {
       setAdmin(result.data);
       setTime(result.data?.delay || 10);
     } catch (e) {
-      console.error("Error fetching data:", e);
+      console.error("Fetch error:", e);
     }
   }, [admin_id]);
 
-  // ─── Fetch analytics ──────────────────────────────────────────────────
-  const fetchAnalytics = async () => {
-    try {
-      const res = await fetch(`${API_URL}/admin/${admin_id}/analytics`);
-      const result = await res.json();
-      setAnalytics(result.data);
-      setShowAnalytics(true);
-    } catch (e) {
-      console.error("Analytics fetch failed:", e);
-    }
-  };
-
-  // ─── Socket setup ─────────────────────────────────────────────────────
+  // ── Socket setup — fix: join room INSIDE connect event ──────────────────
   useEffect(() => {
     fetchData();
 
-    socketRef.current = io(API_URL);
+    // Create socket
+    socketRef.current = io(API_URL, {
+      transports: ["websocket", "polling"],
+    });
     const socket = socketRef.current;
 
     socket.on("connect", () => {
-      // Admin joins their queue room
+      console.log("Admin socket connected:", socket.id);
+      // Join room immediately on connect — this was the timing bug
       socket.emit("join-admin", admin_id);
     });
 
-    // Fix: update existing user, don't append
+    // Fix: replace entire users list, don't append
     socket.on("queue-updated", (updatedUsers) => {
       setUsers(updatedUsers);
     });
@@ -129,94 +113,29 @@ function AdminPage() {
       setUsers(updatedUsers);
     });
 
-    // New user joined
-    socket.on("user-updated", (newUser) => {
-      setUsers((prev) => {
-        const exists = prev.find((u) => u._id === newUser._id);
-        if (exists) {
-          return prev.map((u) => u._id === newUser._id ? newUser : u);
-        }
-        return [...prev, newUser];
-      });
+    socket.on("queue-status-changed", ({ queueStatus, pauseReason }) => {
+      setAdmin((prev) => ({ ...prev, queueStatus, pauseReason, start: queueStatus === "active" }));
     });
 
-    // User deleted by admin or left voluntarily
-    socket.on("user-deleted", (deletedUser) => {
-      setUsers((prev) => prev.filter((u) => u._id !== deletedUser._id));
-    });
-
-    // User called — update their status in the list
-    socket.on("user-called", ({ userId }) => {
-      setUsers((prev) =>
-        prev.map((u) => u._id === userId ? { ...u, status: "called" } : u)
-      );
-    });
-
-    // User skipped
-    socket.on("user-skipped", ({ userId }) => {
-      setUsers((prev) =>
-        prev.map((u) => u._id === userId ? { ...u, status: "skipped" } : u)
-      );
-      showAlert("warning", "User was skipped for not responding.");
-    });
-
-    // User expired
-    socket.on("user-expired", ({ userId, ticketNumber }) => {
-      setUsers((prev) =>
-        prev.map((u) => u._id === userId ? { ...u, status: "expired" } : u)
-      );
-      showAlert("error", `Ticket ${ticketNumber} has expired.`);
-    });
-
-    // Presence confirmed by user
-    socket.on("presence-confirmed", (updatedUser) => {
-      setUsers((prev) =>
-        prev.map((u) => u._id === updatedUser._id ? updatedUser : u)
-      );
-      showAlert("success", `${updatedUser.fullName} confirmed presence.`);
+    socket.on("disconnect", () => {
+      console.log("Admin socket disconnected");
     });
 
     return () => {
       socket.off("connect");
       socket.off("queue-updated");
       socket.off("time-updated");
-      socket.off("user-updated");
-      socket.off("user-deleted");
-      socket.off("user-called");
-      socket.off("user-skipped");
-      socket.off("user-expired");
-      socket.off("presence-confirmed");
+      socket.off("queue-status-changed");
+      socket.off("disconnect");
       socket.disconnect();
     };
-  }, [admin_id, fetchData, showAlert]);
+  }, [admin_id, fetchData]);
 
-  // ─── Handlers ─────────────────────────────────────────────────────────
-  const handleDelete = async (id) => {
-    try {
-      await fetch(`${API_URL}/user/${id}`, { method: "DELETE" });
-    } catch (e) {
-      console.error("Delete failed:", e);
-    }
-  };
-
-  const deleteAdmin = async (id) => {
-    try {
-      await fetch(`${API_URL}/admin/${id}`, { method: "DELETE" });
-      navigate("/login");
-    } catch (e) {
-      console.error("Delete admin failed:", e);
-    }
-  };
-
-  const handleLogout = () => {
-    localStorage.removeItem("adminToken");
-    navigate("/login");
-  };
-
+  // ── Handlers ──────────────────────────────────────────────────────────────
   const handleSetTime = async () => {
     const val = Number(time);
     if (isNaN(val) || val < 1) {
-      showAlert("error", "Please enter a valid time (minimum 1 minute)");
+      showAlert("error", "Enter a valid time (min 1 minute)");
       return;
     }
     try {
@@ -226,73 +145,107 @@ function AdminPage() {
         body: JSON.stringify({ time: val }),
       });
       const result = await res.json();
-      setUsers(result.data);
-      showAlert("success", `Serving time updated to ${val} minutes`);
+      setUsers(result.data || []);
+      setAdmin((prev) => ({ ...prev, delay: val }));
+      showAlert("success", `Serving time set to ${val} min per user`);
     } catch (e) {
-      console.error("Set time failed:", e);
+      console.error("Set time error:", e);
     }
   };
 
-  const handleStartCron = async () => {
-    // If active → show pause input before stopping
+  const handleToggleQueue = async () => {
     if (admin?.start && !showPauseInput) {
       setShowPauseInput(true);
       return;
     }
-
     try {
-      const body = showPauseInput ? { pauseReason } : {};
       const res = await fetch(`${API_URL}/start-process/${admin_id}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify({ pauseReason }),
       });
       const result = await res.json();
       setAdmin(result.admin);
       setShowPauseInput(false);
       setPauseReason("");
     } catch (e) {
-      console.error("Toggle queue failed:", e);
+      console.error("Toggle queue error:", e);
     }
   };
 
-  // ─── Call Next ────────────────────────────────────────────────────────
-  const handleCallNext = async () => {
-    setCallingNext(true);
+  // ── Pop current user — core admin action ─────────────────────────────────
+  const handlePopUser = async () => {
+    if (users.length === 0) {
+      showAlert("error", "Queue is empty");
+      return;
+    }
+    setPopping(true);
     try {
-      const res = await fetch(`${API_URL}/admin/${admin_id}/call-next`, {
+      const res = await fetch(`${API_URL}/admin/${admin_id}/pop`, {
         method: "POST",
       });
       const result = await res.json();
-      if (result.data) {
-        showAlert(
-          "success",
-          `Called: ${result.data.fullName} (${result.data.ticketNumber})`
-        );
+      if (res.ok) {
+        showAlert("success", result.message);
+        // Socket will update the list via queue-updated event
       } else {
-        showAlert("warning", "Queue is empty — no more users.");
+        showAlert("error", result.error);
       }
     } catch (e) {
-      console.error("Call next failed:", e);
+      console.error("Pop error:", e);
     } finally {
-      setCallingNext(false);
+      setPopping(false);
     }
   };
 
-  const filteredUsers = users.filter(
-    (u) =>
-      u.fullName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      u.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      u.ticketNumber?.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const handleDeleteUser = async () => {
+    if (!selectedUser) return;
+    try {
+      await fetch(`${API_URL}/user/${selectedUser._id}`, { method: "DELETE" });
+      setShowDeleteUserDialog(false);
+      setSelectedUser(null);
+    } catch (e) {
+      console.error("Delete user error:", e);
+    }
+  };
 
+  const handleDeleteAdmin = async () => {
+    try {
+      await fetch(`${API_URL}/admin/${admin._id}`, { method: "DELETE" });
+      navigate("/login");
+    } catch (e) {
+      console.error("Delete admin error:", e);
+    }
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem("adminToken");
+    navigate("/login");
+  };
+
+  const fetchAnalytics = async () => {
+    try {
+      const res = await fetch(`${API_URL}/admin/${admin_id}/analytics`);
+      const result = await res.json();
+      setAnalytics(result.data);
+      setShowAnalytics((prev) => !prev);
+    } catch (e) {
+      console.error("Analytics error:", e);
+    }
+  };
+
+  // Only show active waiting users — those currently in the queue
   const activeUsers = users.filter((u) =>
-    ["waiting", "called", "inService"].includes(u.status)
-  ).length;
+    searchQuery
+      ? u.fullName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        u.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        u.ticketNumber?.toLowerCase().includes(searchQuery.toLowerCase())
+      : true
+  );
 
   if (!admin) {
     return (
-      <div className="h-screen w-screen flex items-center justify-center text-white bg-zinc-900">
+      <div className="h-screen flex items-center justify-center text-white bg-zinc-900">
         Loading...
       </div>
     );
@@ -301,212 +254,203 @@ function AdminPage() {
   return (
     <div className="min-h-screen bg-zinc-900 text-gray-100">
 
-      {/* ── Alert Banner ──────────────────────────────────────────────── */}
+      {/* ── Toast alert ───────────────────────────────────────────────── */}
       {alert && (
-        <div
-          className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-lg text-sm
-            font-medium shadow-lg border max-w-sm
-            ${alert.type === "success"
-              ? "bg-emerald-500/20 border-emerald-500/50 text-emerald-300"
-              : alert.type === "warning"
-              ? "bg-yellow-500/20 border-yellow-500/50 text-yellow-300"
-              : "bg-red-500/20 border-red-500/50 text-red-300"
-            }`}
+        <div className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-lg text-sm
+          font-medium shadow-lg border max-w-sm
+          ${alert.type === "success"
+            ? "bg-emerald-500/20 border-emerald-500/50 text-emerald-300"
+            : "bg-red-500/20 border-red-500/50 text-red-300"
+          }`}
         >
           {alert.message}
         </div>
       )}
 
       {/* ── Header ────────────────────────────────────────────────────── */}
-      <header className="border-b border-zinc-800 bg-zinc-900/50 backdrop-blur-sm sticky top-0 z-10">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-          <div className="flex justify-between items-center">
-            <div className="flex items-center gap-2">
-              <div className="h-10 w-10 rounded-full bg-gradient-to-r from-emerald-500 to-teal-500 flex items-center justify-center">
-                <UserCog className="h-5 w-5 text-white" />
-              </div>
-              <h1 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-emerald-400 to-teal-300">
-                Admin Dashboard
-              </h1>
+      <header className="border-b border-zinc-800 sticky top-0 z-10 bg-zinc-900">
+        <div className="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
+          <div className="flex items-center gap-2">
+            <div className="h-9 w-9 rounded-full bg-emerald-600 flex items-center justify-center">
+              <UserCog className="h-5 w-5 text-white" />
             </div>
+            <span className="text-lg font-bold text-emerald-400">
+              Admin Dashboard
+            </span>
+          </div>
 
-            <div className="flex items-center gap-3">
-              {/* Analytics toggle */}
-              <Button
-                variant="outline"
-                className="gap-2 border-zinc-700 text-zinc-300 hover:bg-zinc-800"
-                onClick={fetchAnalytics}
-              >
-                <BarChart2 className="h-4 w-4" />
-                Analytics
-              </Button>
+          <div className="flex items-center gap-3">
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-2 border-zinc-700 text-zinc-300 hover:bg-zinc-800"
+              onClick={fetchAnalytics}
+            >
+              <BarChart2 className="h-4 w-4" />
+              Analytics
+            </Button>
 
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="default" className="flex items-center gap-2">
-                    <CircleUserRound className="h-4 w-4" />
-                    <div className="flex flex-col items-start text-sm">
-                      <span className="font-medium">{admin.fullName}</span>
-                      <span className="text-xs text-gray-400">Administrator</span>
-                    </div>
-                    <ChevronDown className="h-4 w-4 text-gray-400" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-56 bg-zinc-900 border-zinc-800">
-                  <DropdownMenuLabel>My Account</DropdownMenuLabel>
-                  <DropdownMenuSeparator className="bg-zinc-800" />
-                  <DropdownMenuItem
-                    className="flex items-center gap-2 cursor-pointer"
-                    onClick={() => navigate(`/admin/edit/${admin._id}`)}
-                  >
-                    <Edit className="h-4 w-4" />
-                    Edit Profile
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator className="bg-zinc-800" />
-                  <DropdownMenuItem
-                    className="flex items-center gap-2 cursor-pointer text-red-500"
-                    onClick={() => { setDialogAction("deleteAccount"); setShowConfirmDialog(true); }}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                    Delete Account
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator className="bg-zinc-800" />
-                  <DropdownMenuItem
-                    className="flex items-center gap-2 cursor-pointer"
-                    onClick={handleLogout}
-                  >
-                    <LogOut className="h-4 w-4" />
-                    Logout
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" className="flex items-center gap-2">
+                  <CircleUserRound className="h-5 w-5 text-zinc-400" />
+                  <div className="text-left">
+                    <p className="text-sm font-medium">{admin.fullName}</p>
+                    <p className="text-xs text-gray-400">Administrator</p>
+                  </div>
+                  <ChevronDown className="h-4 w-4 text-gray-400" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-48 bg-zinc-900 border-zinc-800">
+                <DropdownMenuLabel>My Account</DropdownMenuLabel>
+                <DropdownMenuSeparator className="bg-zinc-800" />
+                <DropdownMenuItem
+                  className="gap-2 cursor-pointer"
+                  onClick={() => navigate(`/admin/edit/${admin._id}`)}
+                >
+                  <Edit className="h-4 w-4" /> Edit Profile
+                </DropdownMenuItem>
+                <DropdownMenuSeparator className="bg-zinc-800" />
+                <DropdownMenuItem
+                  className="gap-2 cursor-pointer text-red-400"
+                  onClick={() => setShowDeleteAdminDialog(true)}
+                >
+                  <Trash2 className="h-4 w-4" /> Delete Account
+                </DropdownMenuItem>
+                <DropdownMenuSeparator className="bg-zinc-800" />
+                <DropdownMenuItem className="gap-2 cursor-pointer" onClick={handleLogout}>
+                  <LogOut className="h-4 w-4" /> Logout
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
+      <main className="max-w-7xl mx-auto px-4 py-6 space-y-6">
 
-        {/* ── Welcome Banner ─────────────────────────────────────────── */}
-        <div className="relative overflow-hidden rounded-xl bg-gradient-to-r from-emerald-900/50 to-teal-900/50 border border-emerald-800/50 p-6 sm:p-8">
-          <h1 className="text-2xl sm:text-3xl font-bold text-white mb-1">
-            Welcome back, {admin.fullName}
+        {/* ── Welcome ───────────────────────────────────────────────────── */}
+        <div className="rounded-xl bg-gradient-to-r from-emerald-900/40 to-teal-900/40
+          border border-emerald-800/40 p-6">
+          <h1 className="text-2xl font-bold text-white">
+            Welcome, {admin.fullName}
           </h1>
-          <p className="text-emerald-200/80 text-sm">
-            Manage your queue, monitor wait times, and serve users efficiently.
+          <p className="text-emerald-300/70 text-sm mt-1">
+            {admin.start ? "Queue is running" : "Queue is stopped"} ·{" "}
+            {activeUsers.length} user{activeUsers.length !== 1 ? "s" : ""} waiting ·{" "}
+            {admin.delay} min per user
           </p>
         </div>
 
-        {/* ── Analytics Panel ────────────────────────────────────────── */}
+        {/* ── Analytics ─────────────────────────────────────────────────── */}
         {showAnalytics && analytics && (
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             {[
-              { label: "Total Served",    value: analytics.totalServed,          icon: CheckCircle, color: "text-emerald-400" },
-              { label: "Today's Users",   value: analytics.totalToday,           icon: Users,       color: "text-blue-400" },
-              { label: "Currently Waiting", value: analytics.currentlyWaiting,  icon: Clock,       color: "text-yellow-400" },
-              { label: "Avg Wait (min)",  value: analytics.avgWaitTimeMinutes,   icon: Timer,       color: "text-orange-400" },
-            ].map(({ label, value, icon: Icon, color }) => (
+              { label: "Total Served",     value: analytics.totalServed,         color: "text-emerald-400" },
+              { label: "Joined Today",     value: analytics.totalToday,          color: "text-blue-400" },
+              { label: "Currently Waiting",value: analytics.currentlyWaiting,    color: "text-yellow-400" },
+              { label: "Avg Wait (min)",   value: analytics.avgWaitTimeMinutes,  color: "text-orange-400" },
+            ].map(({ label, value, color }) => (
               <div key={label} className="bg-zinc-800 rounded-xl p-4 border border-zinc-700">
-                <div className="flex items-center gap-2 mb-2">
-                  <Icon className={`h-4 w-4 ${color}`} />
-                  <p className="text-xs text-gray-400">{label}</p>
-                </div>
+                <p className="text-xs text-gray-400 mb-1">{label}</p>
                 <p className={`text-2xl font-bold ${color}`}>{value ?? "—"}</p>
               </div>
             ))}
           </div>
         )}
 
-        {/* ── Queue Controls ─────────────────────────────────────────── */}
-        <Card className="bg-zinc-800/50 border border-zinc-800/50">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-xl">
-              <Clock className="h-5 w-5 text-emerald-400" />
+        {/* ── Queue Controls ─────────────────────────────────────────────── */}
+        <Card className="bg-zinc-800/50 border-zinc-700">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Clock className="h-4 w-4 text-emerald-400" />
               Queue Controls
             </CardTitle>
-            <CardDescription className="text-gray-400">
-              Set serving time per user and manage queue state
+            <CardDescription className="text-gray-400 text-sm">
+              Default serving time is {admin.delay} min. Change below and click Set.
             </CardDescription>
           </CardHeader>
 
-          <CardContent className="space-y-4">
-            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 flex-wrap">
+          <CardContent className="space-y-3">
+            <div className="flex flex-wrap gap-3 items-center">
               {/* Time input */}
-              <div className="relative w-full max-w-xs">
+              <div className="relative w-36">
                 <Input
                   type="number"
                   value={time}
-                  onChange={(e) => setTime(e.target.value)}
-                  className="bg-zinc-800/50 border-zinc-700 text-white pr-12"
                   min="1"
-                  placeholder="Minutes per user"
+                  onChange={(e) => setTime(e.target.value)}
+                  className="bg-zinc-700 border-zinc-600 text-white pr-12"
                 />
-                <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none text-gray-400 text-sm">
-                  mins
-                </div>
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">
+                  min
+                </span>
               </div>
 
               <Button
-                className="bg-emerald-700 hover:bg-emerald-800 text-white gap-2"
+                size="sm"
+                className="bg-emerald-700 hover:bg-emerald-800 text-white"
                 onClick={handleSetTime}
               >
-                <Clock className="h-4 w-4" />
                 Set Time
               </Button>
 
-              {/* Start/Stop Queue */}
               <Button
-                variant={admin.start ? "destructive" : "default"}
+                size="sm"
                 className={admin.start
-                  ? "bg-red-500 hover:bg-red-600"
-                  : "bg-blue-600 hover:bg-blue-700"}
-                onClick={handleStartCron}
+                  ? "bg-red-500 hover:bg-red-600 text-white"
+                  : "bg-blue-600 hover:bg-blue-700 text-white"}
+                onClick={handleToggleQueue}
               >
-                <Power className="h-4 w-4 mr-2" />
+                <Power className="h-4 w-4 mr-1.5" />
                 {admin.start ? "Stop Queue" : "Start Queue"}
               </Button>
 
-              {/* Call Next — only when queue is active */}
+              {/* Done → Next — only when queue running */}
               {admin.start && (
                 <Button
-                  className="bg-purple-600 hover:bg-purple-700 text-white gap-2"
-                  onClick={handleCallNext}
-                  disabled={callingNext}
+                  size="sm"
+                  className="bg-purple-600 hover:bg-purple-700 text-white"
+                  onClick={handlePopUser}
+                  disabled={popping || users.length === 0}
                 >
-                  <SkipForward className="h-4 w-4" />
-                  {callingNext ? "Calling..." : "Call Next"}
+                  <SkipForward className="h-4 w-4 mr-1.5" />
+                  {popping ? "Processing..." : "Done → Next"}
                 </Button>
               )}
 
               {/* Search */}
-              <div className="relative ml-auto w-full sm:w-auto">
+              <div className="relative ml-auto">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
                 <Input
-                  placeholder="Search by name, email, ticket..."
-                  className="bg-zinc-800/50 border-zinc-700 text-white pl-10 w-full sm:w-64"
+                  placeholder="Search users..."
+                  className="bg-zinc-700 border-zinc-600 text-white pl-9 w-56"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                 />
               </div>
             </div>
 
-            {/* Pause reason input — shown when stopping queue */}
+            {/* Pause reason input */}
             {showPauseInput && (
-              <div className="flex gap-3 items-center">
+              <div className="flex gap-3 items-center pt-1">
                 <Input
-                  placeholder="Reason for pausing (e.g. Lunch break)"
-                  className="bg-zinc-800/50 border-zinc-700 text-white"
+                  placeholder="Reason for stopping (e.g. Lunch break)"
+                  className="bg-zinc-700 border-zinc-600 text-white"
                   value={pauseReason}
                   onChange={(e) => setPauseReason(e.target.value)}
                 />
                 <Button
-                  variant="destructive"
-                  onClick={handleStartCron}
+                  size="sm"
+                  className="bg-red-500 hover:bg-red-600 text-white shrink-0"
+                  onClick={handleToggleQueue}
                 >
                   Confirm Stop
                 </Button>
                 <Button
+                  size="sm"
                   variant="outline"
+                  className="shrink-0"
                   onClick={() => { setShowPauseInput(false); setPauseReason(""); }}
                 >
                   Cancel
@@ -515,151 +459,137 @@ function AdminPage() {
             )}
           </CardContent>
 
-          <CardFooter className="border-t border-zinc-800 bg-gray-900/20 px-6 py-3">
-            <div className="flex items-center gap-4 text-sm text-gray-400 flex-wrap">
-              <div className="flex items-center gap-1">
+          <CardFooter className="border-t border-zinc-700 py-2 px-6">
+            <div className="flex items-center gap-4 text-xs text-gray-400">
+              <span className="flex items-center gap-1.5">
                 <div className={`h-2 w-2 rounded-full ${admin.start ? "bg-emerald-500" : "bg-gray-500"}`} />
-                <span>{admin.start ? "Queue Active" : "Queue Inactive"}</span>
-              </div>
-              <div className="flex items-center gap-1">
-                <div className="h-2 w-2 rounded-full bg-amber-500" />
-                <span>{activeUsers} Active Users</span>
-              </div>
-              <div className="flex items-center gap-1">
-                <Clock className="h-3 w-3" />
-                <span>{admin.delay || 10} min per user</span>
-              </div>
+                {admin.start ? "Queue Active" : "Queue Inactive"}
+              </span>
+              <span className="flex items-center gap-1.5">
+                <Users className="h-3 w-3" />
+                {activeUsers.length} in queue
+              </span>
             </div>
           </CardFooter>
         </Card>
 
-        {/* ── User Table ─────────────────────────────────────────────── */}
-        <Card className="bg-zinc-800/20 backdrop-blur-sm border-zinc-800">
-          <CardHeader className="border-b border-zinc-800">
-            <CardTitle className="flex items-center gap-2 text-xl">
-              <UserCog className="h-5 w-5 text-emerald-400" />
-              User Management
+        {/* ── User Table ─────────────────────────────────────────────────── */}
+        <Card className="bg-zinc-800/20 border-zinc-800">
+          <CardHeader className="border-b border-zinc-800 pb-4">
+            <CardTitle className="text-base flex items-center gap-2">
+              <UserCog className="h-4 w-4 text-emerald-400" />
+              Active Queue Members
             </CardTitle>
-            <CardDescription className="text-gray-400 mt-1">
-              {filteredUsers.length} user{filteredUsers.length !== 1 ? "s" : ""} in queue
+            <CardDescription className="text-gray-400 text-sm">
+              Click "View" to see user details. Use "Done → Next" to serve and remove the first user.
             </CardDescription>
           </CardHeader>
 
           <div className="overflow-x-auto">
-            <table className="w-full">
+            <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-zinc-800">
-                  {["#", "Ticket", "User", "Contact", "Status", "Time Info", "Actions"].map((h) => (
-                    <th key={h} className="text-left py-4 px-4 text-xs uppercase tracking-wider text-gray-400 font-medium">
-                      {h}
-                    </th>
-                  ))}
+                <tr className="border-b border-zinc-800 text-xs uppercase text-gray-500">
+                  <th className="text-left py-3 px-4">Position</th>
+                  <th className="text-left py-3 px-4">Ticket</th>
+                  <th className="text-left py-3 px-4">Name</th>
+                  <th className="text-left py-3 px-4">Wait Time</th>
+                  <th className="text-left py-3 px-4">Est. Meeting</th>
+                  <th className="text-left py-3 px-4">Joined At</th>
+                  <th className="text-right py-3 px-4">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-800">
-                {filteredUsers.length === 0 ? (
+                {activeUsers.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="text-center py-12 text-gray-500">
+                    <td colSpan={7} className="text-center py-10 text-gray-500">
                       No users in queue
                     </td>
                   </tr>
                 ) : (
-                  filteredUsers.map((user) => {
-                    const sc = STATUS_CONFIG[user.status] || STATUS_CONFIG.waiting;
-                    return (
-                      <tr key={user._id} className="group hover:bg-zinc-800/30 transition-colors">
-
-                        {/* Position */}
-                        <td className="py-4 px-4">
-                          <span className="text-gray-400 font-mono text-sm">
-                            #{user.position || "—"}
-                          </span>
-                        </td>
-
-                        {/* Ticket */}
-                        <td className="py-4 px-4">
-                          <span className="text-emerald-400 font-mono font-medium">
-                            {user.ticketNumber || "—"}
-                          </span>
-                        </td>
-
-                        {/* Name */}
-                        <td className="py-4 px-4">
-                          <p className="font-medium">{user.fullName}</p>
-                        </td>
-
-                        {/* Contact */}
-                        <td className="py-4 px-4">
-                          <p className="text-sm">{user.email}</p>
-                          <p className="text-sm text-gray-400">{user.phone}</p>
-                        </td>
-
-                        {/* Status badge */}
-                        <td className="py-4 px-4">
-                          <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium border ${sc.color}`}>
-                            {sc.label}
-                          </span>
-                          {user.isPresent && (
-                            <span className="ml-1 text-xs text-emerald-400">✓ Here</span>
+                  activeUsers.map((user, index) => (
+                    <tr
+                      key={user._id}
+                      className={`hover:bg-zinc-800/40 transition-colors
+                        ${index === 0 ? "bg-emerald-900/10 border-l-2 border-l-emerald-500" : ""}`}
+                    >
+                      {/* Position — highlight first user (being served) */}
+                      <td className="py-3 px-4">
+                        <span className={`font-mono font-bold
+                          ${index === 0 ? "text-emerald-400" : "text-gray-400"}`}>
+                          #{user.position}
+                          {index === 0 && (
+                            <span className="ml-2 text-xs font-normal bg-emerald-500/20
+                              text-emerald-400 px-1.5 py-0.5 rounded">
+                              Serving
+                            </span>
                           )}
-                        </td>
+                        </span>
+                      </td>
 
-                        {/* Time info */}
-                        <td className="py-4 px-4">
-                          <div className="space-y-1 text-sm">
-                            <div className="flex items-center gap-2">
-                              <Clock className="h-3 w-3 text-gray-400" />
-                              <span>Joined: {FormatArrival(user.createdAt)}</span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <Timer className="h-3 w-3 text-gray-400" />
-                              <span>
-                                Wait:{" "}
-                                {["waiting", "called"].includes(user.status)
-                                  ? FormatTime(user.timeRemaining)
-                                  : "—"}
-                              </span>
-                            </div>
-                          </div>
-                        </td>
+                      {/* Ticket */}
+                      <td className="py-3 px-4">
+                        <span className="text-emerald-400 font-mono">
+                          {user.ticketNumber}
+                        </span>
+                      </td>
 
-                        {/* Actions */}
-                        <td className="py-4 px-4">
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
-                              >
-                                <EllipsisVertical className="h-4 w-4" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end" className="w-48 bg-zinc-900 border-zinc-800">
-                              <DropdownMenuItem
-                                className="flex items-center gap-2 cursor-pointer"
-                                onClick={() => navigate(`/user/edit/${user._id}`)}
-                              >
-                                <Edit className="h-4 w-4" />
-                                Edit User
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                className="flex items-center gap-2 cursor-pointer text-red-500"
-                                onClick={() => {
-                                  setSelectedUser(user._id);
-                                  setDialogAction("delete");
-                                  setShowConfirmDialog(true);
-                                }}
-                              >
-                                <Trash2 className="h-4 w-4" />
-                                Delete User
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        </td>
-                      </tr>
-                    );
-                  })
+                      {/* Name */}
+                      <td className="py-3 px-4 font-medium text-white">
+                        {user.fullName}
+                      </td>
+
+                      {/* Wait time — live countdown */}
+                      <td className="py-3 px-4">
+                        <span className="text-orange-400 font-mono">
+                          {admin.start
+                            ? formatTime(user.timeRemaining)
+                            : "Paused"}
+                        </span>
+                      </td>
+
+                      {/* Estimated meeting time */}
+                      <td className="py-3 px-4 text-gray-300">
+                        {admin.start
+                          ? getMeetingTime(user.timeRemaining)
+                          : "—"}
+                      </td>
+
+                      {/* Joined at */}
+                      <td className="py-3 px-4 text-gray-400">
+                        {formatArrival(user.createdAt)}
+                      </td>
+
+                      {/* Actions — View Details + Delete only */}
+                      <td className="py-3 px-4">
+                        <div className="flex items-center justify-end gap-2">
+                          <button
+                            onClick={() => {
+                              setSelectedUser(user);
+                              setShowUserDetailModal(true);
+                            }}
+                            className="flex items-center gap-1 text-xs px-2.5 py-1.5
+                              rounded border border-zinc-600 text-gray-300
+                              hover:bg-zinc-700 transition"
+                          >
+                            <Eye className="h-3.5 w-3.5" />
+                            View
+                          </button>
+                          <button
+                            onClick={() => {
+                              setSelectedUser(user);
+                              setShowDeleteUserDialog(true);
+                            }}
+                            className="flex items-center gap-1 text-xs px-2.5 py-1.5
+                              rounded border border-red-500/30 text-red-400
+                              hover:bg-red-500/10 transition"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                            Remove
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))
                 )}
               </tbody>
             </table>
@@ -667,32 +597,125 @@ function AdminPage() {
         </Card>
       </main>
 
-      {/* ── Confirm Dialog ─────────────────────────────────────────────── */}
-      <Dialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
+      {/* ── User Detail Modal (read-only) ─────────────────────────────────── */}
+      {showUserDetailModal && selectedUser && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+          <div className="bg-zinc-800 rounded-xl w-full max-w-sm border border-zinc-700">
+            {/* Modal header */}
+            <div className="flex items-center justify-between p-5 border-b border-zinc-700">
+              <h3 className="text-white font-bold">User Details</h3>
+              <button
+                onClick={() => setShowUserDetailModal(false)}
+                className="text-gray-400 hover:text-white"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* Modal body */}
+            <div className="p-5 space-y-4">
+              {/* Ticket + Position */}
+              <div className="flex justify-around text-center pb-3 border-b border-zinc-700">
+                <div>
+                  <p className="text-xs text-gray-400 mb-1">Ticket</p>
+                  <p className="text-2xl font-bold text-emerald-400 font-mono">
+                    {selectedUser.ticketNumber}
+                  </p>
+                </div>
+                <div className="w-px bg-zinc-600" />
+                <div>
+                  <p className="text-xs text-gray-400 mb-1">Position</p>
+                  <p className="text-2xl font-bold text-white">
+                    #{selectedUser.position}
+                  </p>
+                </div>
+              </div>
+
+              {/* Details */}
+              <div className="space-y-3 text-sm">
+                {[
+                  { icon: CircleUserRound, label: "Name",  value: selectedUser.fullName },
+                  { icon: Mail,            label: "Email", value: selectedUser.email },
+                  { icon: Phone,           label: "Phone", value: selectedUser.phone },
+                ].map(({ icon: Icon, label, value }) => (
+                  <div key={label} className="flex items-center gap-3">
+                    <Icon className="h-4 w-4 text-gray-500 shrink-0" />
+                    <span className="text-gray-400 w-12 shrink-0">{label}</span>
+                    <span className="text-white">{value}</span>
+                  </div>
+                ))}
+
+                {/* Timer info */}
+                <div className="flex items-center gap-3">
+                  <Timer className="h-4 w-4 text-gray-500 shrink-0" />
+                  <span className="text-gray-400 w-12 shrink-0">Wait</span>
+                  <span className="text-orange-400 font-mono">
+                    {admin.start ? formatTime(selectedUser.timeRemaining) : "Paused"}
+                  </span>
+                </div>
+                <div className="flex items-center gap-3">
+                  <Clock className="h-4 w-4 text-gray-500 shrink-0" />
+                  <span className="text-gray-400 w-12 shrink-0">Joined</span>
+                  <span className="text-white">{formatArrival(selectedUser.createdAt)}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Modal footer — remove button */}
+            <div className="p-5 border-t border-zinc-700">
+              <button
+                onClick={() => {
+                  setShowUserDetailModal(false);
+                  setShowDeleteUserDialog(true);
+                }}
+                className="w-full py-2 rounded-lg bg-red-500/20 border border-red-500/40
+                  text-red-400 hover:bg-red-500/30 text-sm transition"
+              >
+                Remove from Queue
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Delete User Confirm ───────────────────────────────────────────── */}
+      <Dialog open={showDeleteUserDialog} onOpenChange={setShowDeleteUserDialog}>
         <DialogContent className="bg-zinc-900 border-zinc-800 text-white">
           <DialogHeader>
-            <DialogTitle>
-              {dialogAction === "delete" ? "Delete User" : "Delete Account"}
-            </DialogTitle>
+            <DialogTitle>Remove User?</DialogTitle>
             <DialogDescription className="text-gray-400">
-              {dialogAction === "delete"
-                ? "Are you sure? This removes the user from the queue and updates all positions."
-                : "Are you sure? Your account and all associated users will be permanently deleted."}
+              Remove <span className="text-white font-medium">{selectedUser?.fullName}</span>{" "}
+              ({selectedUser?.ticketNumber}) from the queue?
+              All positions will update automatically.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowConfirmDialog(false)}>
+            <Button variant="outline" onClick={() => setShowDeleteUserDialog(false)}>
               Cancel
             </Button>
-            <Button
-              variant="destructive"
-              onClick={() => {
-                if (dialogAction === "delete") handleDelete(selectedUser);
-                else deleteAdmin(admin._id);
-                setShowConfirmDialog(false);
-              }}
-            >
-              {dialogAction === "delete" ? "Delete User" : "Delete Account"}
+            <Button variant="destructive" onClick={handleDeleteUser}>
+              Remove
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Delete Admin Confirm ──────────────────────────────────────────── */}
+      <Dialog open={showDeleteAdminDialog} onOpenChange={setShowDeleteAdminDialog}>
+        <DialogContent className="bg-zinc-900 border-zinc-800 text-white">
+          <DialogHeader>
+            <DialogTitle>Delete Account?</DialogTitle>
+            <DialogDescription className="text-gray-400">
+              This permanently deletes your admin account and removes all users in your queue.
+              This cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowDeleteAdminDialog(false)}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={handleDeleteAdmin}>
+              Delete Account
             </Button>
           </DialogFooter>
         </DialogContent>
