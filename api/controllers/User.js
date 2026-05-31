@@ -19,16 +19,16 @@ const recalculateQueue = async (adminId) => {
   // i=0 (position 1, being served): timeRemaining = 1 * timePerUser
   // i=1 (position 2, next up):      timeRemaining = 2 * timePerUser
   const bulkOps = users.map((user, i) => ({
-    updateOne: {
-      filter: { _id: user._id },
-      update: {
-        $set: {
-          position: i + 1,
-          timeRemaining: (i + 1) * timePerUser,
-        },
+  updateOne: {
+    filter: { _id: user._id },
+    update: {
+      $set: {
+        position: i + 1,
+        timeRemaining: i * timePerUser, // fix: i not (i+1) — person 1 = 0 wait
       },
     },
-  }));
+  },
+}));
 
   if (bulkOps.length > 0) await User.bulkWrite(bulkOps);
 
