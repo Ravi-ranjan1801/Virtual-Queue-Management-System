@@ -83,15 +83,21 @@ const UserPage = () => {
 
     // Live timer update — find this user in the list
     socket.on("time-updated", (users) => {
-      const me = users.find(u => u._id === user_id);
-      if (me) setUser(prev => ({ ...prev, ...me }));
-    });
+  const me = users.find((u) => u._id === user_id);
+  if (me) {
+    const { admin, ...rest } = me; // never overwrite populated admin
+    setUser((prev) => ({ ...prev, ...rest }));
+  }
+});
 
     // After any queue change (join/delete/pop) — fresh positions + times
     socket.on("queue-updated", (users) => {
-      const me = users.find(u => u._id === user_id);
-      if (me) setUser(prev => ({ ...prev, ...me }));
-    });
+  const me = users.find((u) => u._id === user_id);
+  if (me) {
+    const { admin, ...rest } = me; // never overwrite populated admin
+    setUser((prev) => ({ ...prev, ...rest }));
+  }
+});
 
     // Admin popped someone — this user is now position 2 (nearly called)
     socket.on("user-nearly-called", ({ userId }) => {

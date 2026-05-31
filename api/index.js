@@ -191,32 +191,30 @@ const initCronJob = (admin_id) => {
   if (cronJobs[admin_id]) cronJobs[admin_id].stop();
 
   const cronJob = cron.schedule(
-    "* * * * * *",
-    async () => {
-      try {
-        if (!mongoose.Types.ObjectId.isValid(admin_id)) return;
+  "* * * * * *",
+  async () => {
+    try {
+      if (!mongoose.Types.ObjectId.isValid(admin_id)) return;
 
-        // Bulk decrement — one DB call instead of N saves
-        // Only decrement users with time remaining
-        await User.updateMany(
-          { admin: admin_id, timeRemaining: { $gt: 0 } },
-          { $inc: { timeRemaining: -1 } }
-        );
+      // Simple: only decrement users with time > 0
+      // Person 1 (timeRemaining=0) is skipped automatically
+      // Others freeze at 0 naturally — no extra logic needed
+      await User.updateMany(
+        { admin: admin_id, timeRemaining: { $gt: 0 } },
+        { $inc: { timeRemaining: -1 } }
+      );
 
-        // No auto-delete, no expired status
-        // Admin manually pops when done serving
+      const updated = await User.find({ admin: admin_id })
+        .sort({ createdAt: 1 });
 
-        const allUsers = await User.find({ admin: admin_id })
-          .sort({ createdAt: 1 });
+      io.to(`queue_${admin_id}`).emit("time-updated", updated);
 
-        io.to(`queue_${admin_id}`).emit("time-updated", allUsers);
-
-      } catch (error) {
-        console.error(`Cron error for ${admin_id}:`, error);
-      }
-    },
-    { scheduled: false }
-  );
+    } catch (error) {
+      console.error(`Cron error for ${admin_id}:`, error);
+    }
+  },
+  { scheduled: false }
+);
 
   return cronJob;
 };

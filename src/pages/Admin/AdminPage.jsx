@@ -165,7 +165,14 @@ function AdminPage() {
         body: JSON.stringify({ pauseReason }),
       });
       const result = await res.json();
-      setAdmin(result.admin);
+      if (result.admin) {
+  setAdmin((prev) => ({
+    ...prev,
+    start: result.admin.start,
+    queueStatus: result.admin.queueStatus,
+    pauseReason: result.admin.pauseReason || "",
+  }));
+}
       setShowPauseInput(false);
       setPauseReason("");
     } catch (e) {
