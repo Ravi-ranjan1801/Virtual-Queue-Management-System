@@ -153,32 +153,32 @@ function AdminPage() {
     }
   };
 
-  const handleToggleQueue = async () => {
-    if (admin?.start && !showPauseInput) {
-      setShowPauseInput(true);
-      return;
-    }
-    try {
-      const res = await fetch(`${API_URL}/start-process/${admin_id}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pauseReason }),
-      });
-      const result = await res.json();
-      if (result.admin) {
-  setAdmin((prev) => ({
-    ...prev,
-    start: result.admin.start,
-    queueStatus: result.admin.queueStatus,
-    pauseReason: result.admin.pauseReason || "",
-  }));
-}
-      setShowPauseInput(false);
-      setPauseReason("");
-    } catch (e) {
-      console.error("Toggle queue error:", e);
-    }
-  };
+ const handleToggleQueue = async () => {
+  // Stopping active queue — ask for pause reason first
+  if (admin?.start && !showPauseInput) {
+    setShowPauseInput(true);
+    return;
+  }
+
+  try {
+    await fetch(`${API_URL}/start-process/${admin_id}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pauseReason }),
+    });
+
+    // Re-fetch fresh complete state — avoids all partial merge issues
+    // This is why resume was broken: partial merge missed some fields
+    await fetchData();
+
+    setShowPauseInput(false);
+    setPauseReason("");
+
+  } catch (e) {
+    console.error("Toggle queue error:", e);
+    showAlert("error", "Failed to toggle queue. Please try again.");
+  }
+};
 
   // ── Pop current user — core admin action ─────────────────────────────────
   const handlePopUser = async () => {

@@ -190,15 +190,28 @@ app.post("/start-process/:admin_id", async (req, res) => {
 const initCronJob = (admin_id) => {
   if (cronJobs[admin_id]) cronJobs[admin_id].stop();
 
-  const cronJob = cron.schedule(
+ const cronJob = cron.schedule(
   "* * * * * *",
   async () => {
     try {
       if (!mongoose.Types.ObjectId.isValid(admin_id)) return;
 
-      // Simple: only decrement users with time > 0
-      // Person 1 (timeRemaining=0) is skipped automatically
-      // Others freeze at 0 naturally — no extra logic needed
+      const users = await User.find({ admin: admin_id })
+        .sort({ createdAt: 1 });
+
+      if (users.length === 0) return;
+
+      // Freeze ALL timers when person 2 hits 0
+      // Means: person 1 is in overtime, person 2 is stuck waiting
+      // Person 3+ timers are meaningless until admin pops person 1
+      // Once admin pops, recalculateQueue resets everyone fresh
+      if (users.length >= 2 && users[1].timeRemaining === 0) {
+        io.to(`queue_${admin_id}`).emit("time-updated", users);
+        return; // no countdown this tick
+      }
+
+      // Normal: only decrement users above 0
+      // Person 1 (timeRemaining=0) skipped automatically by $gt:0
       await User.updateMany(
         { admin: admin_id, timeRemaining: { $gt: 0 } },
         { $inc: { timeRemaining: -1 } }
@@ -215,7 +228,6 @@ const initCronJob = (admin_id) => {
   },
   { scheduled: false }
 );
-
   return cronJob;
 };
 
