@@ -82,11 +82,13 @@ const UserPage = () => {
     });
 
     // Live timer update — find this user in the list
-    socket.on("time-updated", (users) => {
+   socket.on("time-updated", (users) => {
   const me = users.find((u) => u._id === user_id);
   if (me) {
-    const { admin, ...rest } = me; // never overwrite populated admin
+    const { admin, ...rest } = me;
     setUser((prev) => ({ ...prev, ...rest }));
+    // Cron only runs when queue is active — if we receive this, queue is active
+    setQueueStatus("active");
   }
 });
 
@@ -157,6 +159,7 @@ const UserPage = () => {
   }
 
   const qs = QUEUE_STATUS[queueStatus] || QUEUE_STATUS.notStarted;
+  const showTimer = queueStatus === "active" || queueStatus === "paused";
   const isQueueActive = queueStatus === "active";
 
   return (
@@ -217,14 +220,28 @@ const UserPage = () => {
         <hr className="border-zinc-700" />
 
         {/* Timing info */}
-        {isQueueActive ? (
+        {showTimer ?  (
           <div className="space-y-3">
             <div className="bg-zinc-700/50 rounded-lg p-3">
-              <p className="text-gray-400 text-xs mb-1">Estimated Wait Time</p>
-              <p className="text-2xl font-bold text-orange-400 font-mono">
-                {user.timeRemaining > 0 ? formatTime(user.timeRemaining) : "Your turn!"}
-              </p>
-            </div>
+  <div className="flex items-center justify-between mb-1">
+    <p className="text-gray-400 text-xs">Estimated Wait Time</p>
+    {!isQueueActive && (
+      <span className="text-xs bg-yellow-500/20 text-yellow-400
+        border border-yellow-500/30 px-2 py-0.5 rounded-full">
+        ⏸ Paused
+      </span>
+    )}
+  </div>
+  <p className={`text-2xl font-bold font-mono
+    ${isQueueActive ? "text-orange-400" : "text-yellow-400"}`}>
+    {user.timeRemaining > 0 ? formatTime(user.timeRemaining) : "Your turn!"}
+  </p>
+  {!isQueueActive && user.timeRemaining > 0 && (
+    <p className="text-yellow-400/60 text-xs mt-1">
+      Queue is Paused - resumes when admin restarts
+    </p>
+  )}
+</div>
             <div className="grid grid-cols-2 gap-3">
               <div className="bg-zinc-700/50 rounded-lg p-3">
                 <p className="text-gray-400 text-xs mb-1">Joined At</p>
@@ -243,15 +260,13 @@ const UserPage = () => {
               You can leave and return before your estimated meeting time
             </p>
           </div>
-        ) : (
-          <div className="text-center py-3">
-            <p className="text-gray-400 text-sm">
-              {queueStatus === "paused"
-                ? "Queue is paused. Timer will resume when admin restarts."
-                : "Waiting for admin to start the queue. Timer will appear here."}
-            </p>
-          </div>
-        )}
+      ) : (
+  <div className="text-center py-3">
+    <p className="text-gray-400 text-sm">
+      Waiting for admin to start the queue. Timer will appear here.
+    </p>
+  </div>
+)}
 
         <hr className="border-zinc-700" />
 
