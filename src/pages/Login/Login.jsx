@@ -43,12 +43,16 @@ const Login = () => {
 
       if (response.ok) {
         if (role === "User") {
-          localStorage.setItem("userToken", result.token);
-          window.open(`/user/${result.data._id}`, "_blank");
-        } else {
-          localStorage.setItem("adminToken", result.token);
-          window.open(`/admin/${result.data._id}`, "_blank");
-        }
+  localStorage.setItem("userToken", result.token);
+  window.open(`/user/${result.data._id}`, "_blank");
+} else {
+  localStorage.setItem("adminToken", result.token);
+  window.open(`/admin/${result.data._id}`, "_blank");
+}
+// Reset form after opening new tab
+setEmail("");
+setPassword("");
+setError("");
       } else {
         // Show exact server error message
         setError(result.error || "Login failed. Please try again.");

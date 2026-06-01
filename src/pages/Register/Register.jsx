@@ -107,13 +107,25 @@ const Register = () => {
       });
       const result = await response.json();
       if (response.ok) {
-        if (role === "User") {
-          localStorage.setItem("userToken", result.token);
-          window.open(`/user/${result.data._id}`, "_blank");
-        } else {
-          localStorage.setItem("adminToken", result.token);
-          window.open(`/admin/${result.data._id}`, "_blank");
-        }
+       if (role === "User") {
+  localStorage.setItem("userToken", result.token);
+  window.open(`/user/${result.data._id}`, "_blank");
+} else {
+  localStorage.setItem("adminToken", result.token);
+  window.open(`/admin/${result.data._id}`, "_blank");
+}
+// Reset form after opening new tab
+setFields({
+  fullName: "",
+  email: "",
+  phone: "",
+  password: "",
+  adminSecret: "",
+  selectedAdmin: "",
+});
+setRole("User");
+setErrors({});
+setServerError("");
       } else {
         setServerError(result.error || "Registration failed. Please try again.");
       }
