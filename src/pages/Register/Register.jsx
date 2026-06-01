@@ -109,10 +109,10 @@ const Register = () => {
       if (response.ok) {
         if (role === "User") {
           localStorage.setItem("userToken", result.token);
-          navigate(`/user/${result.data._id}`);
+          window.open(`/user/${result.data._id}`, "_blank");
         } else {
           localStorage.setItem("adminToken", result.token);
-          navigate(`/admin/${result.data._id}`);
+          window.open(`/admin/${result.data._id}`, "_blank");
         }
       } else {
         setServerError(result.error || "Registration failed. Please try again.");

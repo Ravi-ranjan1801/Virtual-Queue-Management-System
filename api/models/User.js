@@ -33,6 +33,10 @@ const adminSchema = new mongoose.Schema(
       enum: ["notStarted", "active", "paused"],
       default: "notStarted",
     },
+    ticketCounter: {
+     type: Number,
+       default: 0, // increments forever — never resets
+    },
     pauseReason: { type: String, default: "" },
     totalServed: { type: Number, default: 0 },
     users: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],

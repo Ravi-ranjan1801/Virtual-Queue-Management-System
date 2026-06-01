@@ -59,8 +59,12 @@ const registerUser = async (req, res) => {
     }
 
     // Ticket number: A001, A002... based on total ever joined this queue
-    const count = await User.countDocuments({ admin });
-    const ticketNumber = `A${(count + 1).toString().padStart(3, "0")}`;
+    const updatedAdmin = await Admin.findByIdAndUpdate(
+  admin,
+  { $inc: { ticketCounter: 1 } },
+  { new: true }
+);
+const ticketNumber = `A${updatedAdmin.ticketCounter.toString().padStart(3, "0")}`;
 
     const userDoc = await User.create({
       fullName, email, phone, admin, ticketNumber,
