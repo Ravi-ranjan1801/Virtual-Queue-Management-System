@@ -1,10 +1,14 @@
+import { Navigate } from "react-router-dom";
 
-import { Navigate } from 'react-router-dom';
+// Checks correct token based on route type
+// LLD: Single Responsibility — one component handles all auth guards
+const PrivateRoute = ({ children, role = "admin" }) => {
+  const token =
+    role === "admin"
+      ? localStorage.getItem("adminToken")
+      : localStorage.getItem("userToken");
 
-const PrivateRoute = ({ children }) => {
-  const isAuthenticated = localStorage.getItem('adminToken'); // Check if the token exists in localStorage
-
-  return isAuthenticated ? children : <Navigate to="/login" />;
+  return token ? children : <Navigate to="/login" />;
 };
 
 export default PrivateRoute;

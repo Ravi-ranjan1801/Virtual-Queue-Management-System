@@ -102,14 +102,19 @@ const EditAdminPage = () => {
               Mobile Number
             </label>
             <input
-              type="tel"
-              name="phone"
-              id="phone"
-              value={admin.phone}
-              onChange={handleChange}
-              placeholder="Phone"
-              className="w-full p-2 border rounded bg-zinc-700 text-white border-gray-600"
-            />
+  type="tel"
+  name="phone"
+  id="phone"
+  value={admin.phone}
+  onChange={(e) => {
+    const val = e.target.value;
+    if (!/^\d*$/.test(val)) return;   // digits only
+    if (val.length > 10) return;      // max 10
+    handleChange(e);
+  }}
+  placeholder="10-digit mobile number"
+  className="w-full p-2 border rounded bg-zinc-700 text-white border-gray-600"
+/>
           </div>
 
           <button
