@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import io from "socket.io-client";
 
-const API_URL = "http://localhost:5000";
+import API_URL from "../../config/api";
 
 // Format seconds → "2h 5m 30s"
 const formatTime = (sec) => {

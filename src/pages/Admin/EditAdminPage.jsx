@@ -1,3 +1,4 @@
+import API_URL from "../../config/api";
 import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 
@@ -13,7 +14,7 @@ const EditAdminPage = () => {
   useEffect(() => {
     const fetchAdmin = async () => {
       try {
-        const response = await fetch(`http://localhost:5000/admin/${adminId}`);
+        const response = await fetch(`${API_URL}/admin/${adminId}`);
         const result = await response.json();
         console.log(result.data);
         setAdmin(result.data);
@@ -27,7 +28,7 @@ const EditAdminPage = () => {
   const handleUpdate = async (event) => {
     event.preventDefault();
     try {
-      const response = await fetch(`http://localhost:5000/admin/${adminId}`, {
+      const response = await fetch(`${API_URL}/admin/${adminId}`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",

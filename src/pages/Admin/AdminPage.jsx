@@ -1,3 +1,4 @@
+import API_URL from "../../config/api";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
@@ -22,7 +23,6 @@ import {
   DialogFooter, DialogHeader, DialogTitle,
 } from "/src/Components/ui/dialog";
 
-const API_URL = "http://localhost:5000";
 
 const formatTime = (sec) => {
   if (!sec || sec <= 0) return "0h 0m 0s";

@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { Search, UserCog } from "lucide-react";
 import io from "socket.io-client";
 
-const API_URL = "http://localhost:5000";
+import API_URL from "../config/api";
 
 const AllAdmins = () => {
   const [admins, setAdmins] = useState([]);
