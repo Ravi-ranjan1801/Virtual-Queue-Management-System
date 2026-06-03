@@ -114,14 +114,13 @@ app.put("/users/set-time/:admin_id", async (req, res) => {
       return res.status(400).json({ error: "Time must be a positive number" });
     }
 
+    // Save new delay first — recalculateQueue reads it from DB
     admin.delay = newDelay;
     await admin.save();
 
-    const timePerUser = newDelay * 60;
-
-    // Full reset — admin explicitly changed the delay
-    // This is the ONLY place where all timers should reset
-    const updatedUsers = await fullResetTimers(admin_id, timePerUser);
+    // Full reset — admin explicitly changed serving time
+    // recalculateQueue now reads admin.delay internally
+    const updatedUsers = await recalculateQueue(admin_id);
 
     io.to(`queue_${admin_id}`).emit("queue-updated", updatedUsers);
 
