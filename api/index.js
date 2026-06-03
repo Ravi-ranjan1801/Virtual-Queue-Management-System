@@ -8,8 +8,11 @@ const rateLimit = require("express-rate-limit");
 const initializeIo = require("./controllers/initializeIo");
 const { User, Admin, USER_STATUS } = require("./models/User");
 const dbConnect = require("./config/database");
-const { recalculateQueue } = require("./controllers/User");
-const { setIoInstance: setUserIoInstance } = require("./controllers/User");
+const { 
+  recalculateQueue, 
+  fullResetTimers,       
+  setIoInstance: setUserIoInstance 
+} = require("./controllers/User");
 const { setIoInstance: setAdminIoInstance } = require("./controllers/Admin");
 const userRoutes = require("./routes/userRoutes");
 const adminRoutes = require("./routes/adminRoutes");
@@ -112,12 +115,14 @@ app.put("/users/set-time/:admin_id", async (req, res) => {
       return res.status(400).json({ error: "Time must be a positive number" });
     }
 
-    // Update admin's delay setting
     admin.delay = newDelay;
     await admin.save();
 
-    // Recalculate all user wait times with new delay
-    const updatedUsers = await recalculateQueue(admin_id);
+    const timePerUser = newDelay * 60;
+
+    // Full reset — admin explicitly changed the delay
+    // This is the ONLY place where all timers should reset
+    const updatedUsers = await fullResetTimers(admin_id, timePerUser);
 
     io.to(`queue_${admin_id}`).emit("queue-updated", updatedUsers);
 
