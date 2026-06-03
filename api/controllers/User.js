@@ -7,30 +7,42 @@ const setIoInstance = (ioInstance) => { io = ioInstance; };
 
 // ── Core queue recalculation ───────────────────────────────────────────────
 // Called after: user joins, user deleted, admin pops, time changes
-// LLD: Single function, single responsibility — all queue math lives here
-// Only updates positions — NEVER touches existing timers
 // LLD: Single Responsibility — position logic separated from timer logic
+// Called on POP and DELETE — full timer reset for everyone
 const recalculateQueue = async (adminId) => {
+  const admin = await Admin.findById(adminId);
+  if (!admin) return [];
+  const timePerUser = (admin.delay || 10) * 60;
   const users = await User.find({ admin: adminId }).sort({ createdAt: 1 });
 
-  if (users.length === 0) return [];
-
-  const bulkOps = users.map((user, i) => {
-    const update = { position: i + 1 };
-    // Position 1 always gets timeRemaining = 0 (being served)
-    // This handles the case after a pop where new P1 
-    // still has their old waiting timer
-    if (i === 0) update.timeRemaining = 0;
-    return {
-      updateOne: {
-        filter: { _id: user._id },
-        update: { $set: update },
+  const bulkOps = users.map((user, i) => ({
+    updateOne: {
+      filter: { _id: user._id },
+      update: {
+        $set: {
+          position: i + 1,
+          timeRemaining: i * timePerUser, // P1=0, P2=delay, P3=2×delay
+        },
       },
-    };
-  });
+    },
+  }));
 
   if (bulkOps.length > 0) await User.bulkWrite(bulkOps);
+  return await User.find({ admin: adminId }).sort({ createdAt: 1 });
+};
 
+// Called on JOIN only — positions only, timers untouched
+const recalculatePositions = async (adminId) => {
+  const users = await User.find({ admin: adminId }).sort({ createdAt: 1 });
+
+  const bulkOps = users.map((user, i) => ({
+    updateOne: {
+      filter: { _id: user._id },
+      update: { $set: { position: i + 1 } },
+    },
+  }));
+
+  if (bulkOps.length > 0) await User.bulkWrite(bulkOps);
   return await User.find({ admin: adminId }).sort({ createdAt: 1 });
 };
 
@@ -102,7 +114,7 @@ const registerUser = async (req, res) => {
     await Admin.findByIdAndUpdate(admin, { $push: { users: userDoc._id } });
 
     // Update positions only — existing timers untouched
-    const updatedUsers = await recalculateQueue(admin);
+    const updatedUsers = await recalculatePositions(admin);
     io.to(`queue_${admin}`).emit("queue-updated", updatedUsers);
 
     const updatedUser = updatedUsers.find(
@@ -207,5 +219,6 @@ const getUser = async (req, res) => {
 module.exports = {
   registerUser, loginUser, deleteUser,
   leaveQueue, getUser, setIoInstance,
-  recalculateQueue, fullResetTimers,  
+  recalculateQueue,      // used by Admin.js (pop, delete)
+  recalculatePositions,  // used by registerUser (join)
 };

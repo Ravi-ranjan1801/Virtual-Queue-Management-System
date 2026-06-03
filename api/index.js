@@ -8,10 +8,9 @@ const rateLimit = require("express-rate-limit");
 const initializeIo = require("./controllers/initializeIo");
 const { User, Admin, USER_STATUS } = require("./models/User");
 const dbConnect = require("./config/database");
-const { 
-  recalculateQueue, 
-  fullResetTimers,       
-  setIoInstance: setUserIoInstance 
+const {
+  recalculateQueue,
+  setIoInstance: setUserIoInstance,
 } = require("./controllers/User");
 const { setIoInstance: setAdminIoInstance } = require("./controllers/Admin");
 const userRoutes = require("./routes/userRoutes");
