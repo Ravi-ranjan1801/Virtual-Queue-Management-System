@@ -34,6 +34,7 @@ app.use(
   cors({
     origin: [
       "http://localhost:5173",
+      "https://virtual-queue-management-system.vercel.app",
       process.env.CLIENT_URL,
     ].filter(Boolean),
     credentials: true,
