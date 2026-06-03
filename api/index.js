@@ -21,12 +21,15 @@ const adminRoutes = require("./routes/adminRoutes");
 require("dotenv").config({ path: __dirname + "/.env" });
 
 const app = express();
+app.set("trust proxy", 1); // trust first proxy — required on Render/Heroku
 const server = http.createServer(app);
 
 // ─── Middleware ────────────────────────────────────────────────────────────
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-
+app.get("/", (req, res) => {
+  res.json({ message: "VQMS Backend running", status: "ok" });
+});
 app.use(
   cors({
     origin: [
