@@ -6,20 +6,6 @@ A real-time digital queue solution for hospitals, banks, and service counters. U
 
 > ⚠️ Free tier hosting — backend may take ~50 seconds to wake up on first request.
 
----
-
-## Screenshots
-
-### Register & Join Queue
-![Register](./screenshots/register-user.png)
-
-### Admin Dashboard
-![Admin Dashboard](./screenshots/admin-dashboard.png)
-
-### User Queue Status
-![User Dashboard](./screenshots/user-dashboard.png)
-
----
 
 ## Tech Stack
 
@@ -166,5 +152,21 @@ development → all feature work, merged to main per phase
 Commit convention: `feat:` `fix:` `docs:` `refactor:`
 
 ---
+
+---
+
+## Screenshots
+
+### Register & Join Queue
+![Register](./screenshots/register-user.png)
+
+### Admin Dashboard
+![Admin Dashboard](./screenshots/admin-dashboard.png)
+
+### User Queue Status
+![User Dashboard](./screenshots/user-dashboard.png)
+
+---
+
 
 **Made with ❤️ by [Raviranjan Kumar](https://github.com/Ravi-ranjan1801)**
