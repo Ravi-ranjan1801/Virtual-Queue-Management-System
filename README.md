@@ -157,14 +157,11 @@ Commit convention: `feat:` `fix:` `docs:` `refactor:`
 
 ## Screenshots
 
-### Register & Join Queue
-![Register](./screenshots/register-user.png)
 
-### Admin Dashboard
-![Admin Dashboard](./screenshots/admin-dashboard.png)
+| Register & Join Queue | Admin Dashboard | User Queue Status |
+| :---: | :---: | :---: |
+| ![Register](./screenshots/register-user.png) | ![Admin Dashboard](./screenshots/admin-dashboard.png) | ![User Dashboard](./screenshots/user-dashboard.png) |
 
-### User Queue Status
-![User Dashboard](./screenshots/user-dashboard.png)
 
 ---
 
